@@ -84,7 +84,7 @@ function App() {
           )}
           {updateStatus?.status === 'error' && (
             <Typography variant="body2" sx={{ mr: 2, color: 'error.main' }}>
-              Update error
+              Update error: {updateStatus.message || 'unknown'}
             </Typography>
           )}
           {updateStatus?.status === 'downloading' && (
