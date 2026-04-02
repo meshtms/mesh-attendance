@@ -5,7 +5,7 @@ import { DataGrid, GridColDef, GridRowParams } from '@mui/x-data-grid'
 import type { StudentAbsence } from '../shared/types'
 import { useStudentAbsences } from './hooks/useStudentAbsences'
 import { useSync } from './hooks/useSync'
-import StudentDetail from './components/StudentDetail'
+import DrillDetail from './components/DrillDetail'
 
 const columns: GridColDef[] = [
   {
@@ -106,7 +106,7 @@ function App() {
 
       {selectedStudent ? (
         <Box sx={{ flex: 1, minHeight: 0 }}>
-          <StudentDetail
+          <DrillDetail
             student={selectedStudent}
             onBack={() => setSelectedStudent(null)}
           />

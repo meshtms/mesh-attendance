@@ -8,8 +8,6 @@ import type { StudentAbsence, AbsenceRecord } from '../../shared/types'
 
 interface Props {
   student: StudentAbsence
-  drillType: 'course' | 'reason'
-  drillValue: string
   onBack: () => void
 }
 
@@ -82,7 +80,7 @@ function useToggleSet(initial: Set<string>) {
   return { selected, toggle }
 }
 
-function DrillDetail({ student, drillType, drillValue, onBack }: Props) {
+function DrillDetail({ student, onBack }: Props) {
   const { records: allRecords } = useStudentRecords(
     student.student_first_name,
     student.student_last_name,
@@ -101,8 +99,8 @@ function DrillDetail({ student, drillType, drillValue, onBack }: Props) {
     [allRecords],
   )
 
-  const courseFilters = useToggleSet(drillType === 'course' ? new Set([drillValue]) : new Set())
-  const reasonFilters = useToggleSet(drillType === 'reason' ? new Set([drillValue]) : new Set())
+  const courseFilters = useToggleSet(new Set())
+  const reasonFilters = useToggleSet(new Set())
   const statusFilters = useToggleSet(new Set())
 
   const filteredRecords = useMemo(() => {
@@ -132,7 +130,7 @@ function DrillDetail({ student, drillType, drillValue, onBack }: Props) {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 3, pt: 2, pb: 1 }}>
         <Button variant="outlined" onClick={onBack} size="small">
-          Back to Student
+          Return to Grid
         </Button>
         <Typography variant="h6">
           {student.student_first_name} {student.student_last_name}
