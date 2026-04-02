@@ -21,7 +21,8 @@ function getThresholdColor(value: number) {
 }
 
 function getExcusedColor(name: string) {
-  if (name.toLowerCase().includes('unexcused')) return COLOR_UNEXCUSED
+  const lower = name.toLowerCase()
+  if (lower.includes('unexcused') || lower.includes('under review')) return COLOR_UNEXCUSED
   return COLOR_EXCUSED
 }
 

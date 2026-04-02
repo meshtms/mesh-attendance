@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('get-student-course-records', firstName, lastName, course),
   getStudentReasonRecords: (firstName: string, lastName: string, reason: string) =>
     ipcRenderer.invoke('get-student-reason-records', firstName, lastName, reason),
+  getAllReasons: () => ipcRenderer.invoke('get-all-reasons'),
+  getExcludedReasons: () => ipcRenderer.invoke('get-excluded-reasons'),
+  setExcludedReasons: (reasons: string[]) => ipcRenderer.invoke('set-excluded-reasons', reasons),
   onUpdateStatus: (callback: (status: { status: string; version?: string; percent?: number; message?: string }) => void) => {
     ipcRenderer.on('update-status', (_event, data) => callback(data))
   },

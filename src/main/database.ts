@@ -48,6 +48,12 @@ export async function initDatabase(): Promise<void> {
     )
   `)
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS excluded_reasons (
+      reason TEXT PRIMARY KEY NOT NULL
+    )
+  `)
+
   saveDatabase()
 }
 
@@ -128,11 +134,21 @@ function getFallCutoff(): string | null {
   return `${fallYear}-12-31`
 }
 
+function getExcludedReasonsClause(): string {
+  if (!db) return ''
+  const results = db.exec(`SELECT reason FROM excluded_reasons`)
+  if (results.length === 0 || results[0].values.length === 0) return ''
+  const reasons = results[0].values.map((row: unknown[]) => (row[0] as string).replace(/'/g, "''"))
+  return `AND reason NOT IN ('${reasons.join("','")}')`
+}
+
 export function getStudentAbsences(): StudentAbsence[] {
   if (!db) throw new Error('Database not initialized')
 
   const cutoff = getFallCutoff()
   if (!cutoff) return []
+
+  const excludeClause = getExcludedReasonsClause()
 
   const results = db.exec(`
     SELECT
@@ -142,6 +158,7 @@ export function getStudentAbsences(): StudentAbsence[] {
       SUM(CASE WHEN attendance_date <= '${cutoff}' THEN absence_value ELSE 0 END) as fall_absences,
       SUM(CASE WHEN attendance_date > '${cutoff}' THEN absence_value ELSE 0 END) as spring_absences
     FROM attendance
+    WHERE 1=1 ${excludeClause}
     GROUP BY student_first_name, student_last_name
     ORDER BY student_last_name, student_first_name
   `)
@@ -163,6 +180,8 @@ export function getStudentCourseAbsences(firstName: string, lastName: string): S
   const cutoff = getFallCutoff()
   if (!cutoff) return []
 
+  const excludeClause = getExcludedReasonsClause()
+
   const stmt = db.prepare(`
     SELECT
       course,
@@ -170,7 +189,7 @@ export function getStudentCourseAbsences(firstName: string, lastName: string): S
       SUM(CASE WHEN attendance_date <= '${cutoff}' THEN absence_value ELSE 0 END) as fall_absences,
       SUM(CASE WHEN attendance_date > '${cutoff}' THEN absence_value ELSE 0 END) as spring_absences
     FROM attendance
-    WHERE student_first_name = ? AND student_last_name = ?
+    WHERE student_first_name = ? AND student_last_name = ? ${excludeClause}
     GROUP BY course
     ORDER BY total_absences DESC
   `)
@@ -197,6 +216,8 @@ export function getStudentReasonAbsences(firstName: string, lastName: string): S
   const cutoff = getFallCutoff()
   if (!cutoff) return []
 
+  const excludeClause = getExcludedReasonsClause()
+
   const stmt = db.prepare(`
     SELECT
       reason,
@@ -204,7 +225,7 @@ export function getStudentReasonAbsences(firstName: string, lastName: string): S
       SUM(CASE WHEN attendance_date <= '${cutoff}' THEN absence_value ELSE 0 END) as fall_absences,
       SUM(CASE WHEN attendance_date > '${cutoff}' THEN absence_value ELSE 0 END) as spring_absences
     FROM attendance
-    WHERE student_first_name = ? AND student_last_name = ?
+    WHERE student_first_name = ? AND student_last_name = ? ${excludeClause}
     GROUP BY reason
     ORDER BY total_absences DESC
   `)
@@ -228,10 +249,12 @@ export function getStudentReasonAbsences(firstName: string, lastName: string): S
 export function getStudentRecords(firstName: string, lastName: string): AbsenceRecord[] {
   if (!db) throw new Error('Database not initialized')
 
+  const excludeClause = getExcludedReasonsClause()
+
   const stmt = db.prepare(`
     SELECT attendance_date, reason, course, excused_unexcused, absence_value
     FROM attendance
-    WHERE student_first_name = ? AND student_last_name = ?
+    WHERE student_first_name = ? AND student_last_name = ? ${excludeClause}
     ORDER BY attendance_date DESC
   `)
 
@@ -255,10 +278,12 @@ export function getStudentRecords(firstName: string, lastName: string): AbsenceR
 export function getStudentCourseRecords(firstName: string, lastName: string, course: string): AbsenceRecord[] {
   if (!db) throw new Error('Database not initialized')
 
+  const excludeClause = getExcludedReasonsClause()
+
   const stmt = db.prepare(`
     SELECT attendance_date, reason, course, excused_unexcused, absence_value
     FROM attendance
-    WHERE student_first_name = ? AND student_last_name = ? AND course = ?
+    WHERE student_first_name = ? AND student_last_name = ? AND course = ? ${excludeClause}
     ORDER BY attendance_date DESC
   `)
 
@@ -282,10 +307,12 @@ export function getStudentCourseRecords(firstName: string, lastName: string, cou
 export function getStudentReasonRecords(firstName: string, lastName: string, reason: string): AbsenceRecord[] {
   if (!db) throw new Error('Database not initialized')
 
+  const excludeClause = getExcludedReasonsClause()
+
   const stmt = db.prepare(`
     SELECT attendance_date, reason, course, excused_unexcused, absence_value
     FROM attendance
-    WHERE student_first_name = ? AND student_last_name = ? AND reason = ?
+    WHERE student_first_name = ? AND student_last_name = ? AND reason = ? ${excludeClause}
     ORDER BY attendance_date DESC
   `)
 
@@ -304,4 +331,34 @@ export function getStudentReasonRecords(firstName: string, lastName: string, rea
   stmt.free()
 
   return rows
+}
+
+export function getAllReasons(): string[] {
+  if (!db) throw new Error('Database not initialized')
+
+  const results = db.exec(`SELECT DISTINCT reason FROM attendance ORDER BY reason`)
+  if (results.length === 0) return []
+
+  return results[0].values.map((row: unknown[]) => row[0] as string)
+}
+
+export function getExcludedReasons(): string[] {
+  if (!db) throw new Error('Database not initialized')
+
+  const results = db.exec(`SELECT reason FROM excluded_reasons ORDER BY reason`)
+  if (results.length === 0) return []
+
+  return results[0].values.map((row: unknown[]) => row[0] as string)
+}
+
+export function setExcludedReasons(reasons: string[]): void {
+  if (!db) throw new Error('Database not initialized')
+
+  db.run(`DELETE FROM excluded_reasons`)
+  const stmt = db.prepare(`INSERT INTO excluded_reasons (reason) VALUES (?)`)
+  for (const reason of reasons) {
+    stmt.run([reason])
+  }
+  stmt.free()
+  saveDatabase()
 }

@@ -44,6 +44,9 @@ declare global {
       getStudentRecords: (firstName: string, lastName: string) => Promise<AbsenceRecord[]>
       getStudentCourseRecords: (firstName: string, lastName: string, course: string) => Promise<AbsenceRecord[]>
       getStudentReasonRecords: (firstName: string, lastName: string, reason: string) => Promise<AbsenceRecord[]>
+      getAllReasons: () => Promise<string[]>
+      getExcludedReasons: () => Promise<string[]>
+      setExcludedReasons: (reasons: string[]) => Promise<void>
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => void
       installUpdate: () => Promise<void>
       getVersion: () => Promise<string>

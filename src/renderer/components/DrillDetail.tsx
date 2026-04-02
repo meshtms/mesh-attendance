@@ -90,14 +90,6 @@ function DrillDetail({ student, onBack }: Props) {
     () => [...new Set(allRecords.map((r) => r.course))].sort(),
     [allRecords],
   )
-  const allReasons = useMemo(
-    () => [...new Set(allRecords.map((r) => r.reason))].sort(),
-    [allRecords],
-  )
-  const allStatuses = useMemo(
-    () => [...new Set(allRecords.map((r) => r.excused_unexcused))].sort(),
-    [allRecords],
-  )
 
   const fallCutoff = useMemo(() => {
     if (allRecords.length === 0) return ''
@@ -109,27 +101,27 @@ function DrillDetail({ student, onBack }: Props) {
     return `${fallYear}-12-31`
   }, [allRecords])
 
-  const semesterFilters = useToggleSet(new Set())
+  // Determine current semester based on today's date (Aug-Dec = Fall, Jan-Jul = Spring)
+  const currentSemester = useMemo(() => {
+    const now = new Date()
+    const month = now.getMonth() + 1 // 1-12
+    return month >= 8 ? 'Fall' : 'Spring'
+  }, [])
+
+  const [semesterFilter, setSemesterFilter] = useState<'Full Year' | 'Fall' | 'Spring'>(currentSemester)
   const courseFilters = useToggleSet(new Set())
-  const reasonFilters = useToggleSet(new Set())
-  const statusFilters = useToggleSet(new Set())
 
   const filteredRecords = useMemo(() => {
     let result = allRecords
-    if (semesterFilters.selected.size === 1) {
-      if (semesterFilters.selected.has('Fall'))
-        result = result.filter((r) => r.attendance_date <= fallCutoff)
-      else if (semesterFilters.selected.has('Spring'))
-        result = result.filter((r) => r.attendance_date > fallCutoff)
-    }
+    if (semesterFilter === 'Fall')
+      result = result.filter((r) => r.attendance_date <= fallCutoff)
+    else if (semesterFilter === 'Spring')
+      result = result.filter((r) => r.attendance_date > fallCutoff)
+    // 'Full Year' shows all records
     if (courseFilters.selected.size > 0)
       result = result.filter((r) => courseFilters.selected.has(r.course))
-    if (reasonFilters.selected.size > 0)
-      result = result.filter((r) => reasonFilters.selected.has(r.reason))
-    if (statusFilters.selected.size > 0)
-      result = result.filter((r) => statusFilters.selected.has(r.excused_unexcused))
     return result
-  }, [allRecords, fallCutoff, semesterFilters.selected, courseFilters.selected, reasonFilters.selected, statusFilters.selected])
+  }, [allRecords, fallCutoff, semesterFilter, courseFilters.selected])
 
   const courseData = useMemo(
     () => buildGroupData(filteredRecords, 'course').sort((a, b) => b.value - a.value),
@@ -161,8 +153,8 @@ function DrillDetail({ student, onBack }: Props) {
             Semester
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {['Fall', 'Spring'].map((s) => (
-              <Box key={s} onClick={() => semesterFilters.toggle(s)} sx={toggleBtnSx(semesterFilters.selected.has(s))}>
+            {(['Full Year', 'Fall', 'Spring'] as const).map((s) => (
+              <Box key={s} onClick={() => setSemesterFilter(s)} sx={toggleBtnSx(semesterFilter === s)}>
                 {s}
               </Box>
             ))}
@@ -176,30 +168,6 @@ function DrillDetail({ student, onBack }: Props) {
             {allCourses.map((c) => (
               <Box key={c} onClick={() => courseFilters.toggle(c)} sx={toggleBtnSx(courseFilters.selected.has(c))}>
                 {c}
-              </Box>
-            ))}
-          </Box>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', width: 52, flexShrink: 0 }}>
-            Reason
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {allReasons.map((r) => (
-              <Box key={r} onClick={() => reasonFilters.toggle(r)} sx={toggleBtnSx(reasonFilters.selected.has(r))}>
-                {r}
-              </Box>
-            ))}
-          </Box>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', width: 52, flexShrink: 0 }}>
-            Status
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {allStatuses.map((s) => (
-              <Box key={s} onClick={() => statusFilters.toggle(s)} sx={toggleBtnSx(statusFilters.selected.has(s))}>
-                {s}
               </Box>
             ))}
           </Box>

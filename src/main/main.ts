@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords } from './database'
+import { initDatabase, importCSV, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getAllReasons, getExcludedReasons, setExcludedReasons } from './database'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -71,6 +71,18 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('get-student-reason-records', (_event, firstName: string, lastName: string, reason: string) => {
     return getStudentReasonRecords(firstName, lastName, reason)
+  })
+
+  ipcMain.handle('get-all-reasons', () => {
+    return getAllReasons()
+  })
+
+  ipcMain.handle('get-excluded-reasons', () => {
+    return getExcludedReasons()
+  })
+
+  ipcMain.handle('set-excluded-reasons', (_event, reasons: string[]) => {
+    setExcludedReasons(reasons)
   })
 
   createWindow()

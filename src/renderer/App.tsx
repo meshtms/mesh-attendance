@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect } from 'react'
-import { AppBar, Toolbar, Typography, Button, Box, TextField } from '@mui/material'
+import { AppBar, Toolbar, Typography, Button, Box, TextField, IconButton } from '@mui/material'
+import SettingsIcon from '@mui/icons-material/Settings'
 import type { UpdateStatus } from '../shared/types'
 import { DataGrid, GridColDef, GridRowParams } from '@mui/x-data-grid'
 import type { StudentAbsence } from '../shared/types'
 import { useStudentAbsences } from './hooks/useStudentAbsences'
 import { useSync } from './hooks/useSync'
 import DrillDetail from './components/DrillDetail'
+import Settings from './components/Settings'
 
 const columns: GridColDef[] = [
   {
@@ -48,6 +50,7 @@ function App() {
   const { students, reload: reloadStudents } = useStudentAbsences()
   const [filter, setFilter] = useState('')
   const [selectedStudent, setSelectedStudent] = useState<StudentAbsence | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   const { syncing, syncMessage, sync } = useSync(reloadStudents)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
@@ -111,10 +114,17 @@ function App() {
           <Button variant="outlined" onClick={sync} disabled={syncing}>
             {syncing ? 'Syncing...' : 'Sync Data'}
           </Button>
+          <IconButton onClick={() => setShowSettings(true)} sx={{ ml: 1 }} title="Settings">
+            <SettingsIcon />
+          </IconButton>
         </Toolbar>
       </AppBar>
 
-      {selectedStudent ? (
+      {showSettings ? (
+        <Box sx={{ flex: 1, minHeight: 0 }}>
+          <Settings onBack={() => setShowSettings(false)} onSave={reloadStudents} />
+        </Box>
+      ) : selectedStudent ? (
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <DrillDetail
             student={selectedStudent}
