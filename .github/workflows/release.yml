@@ -52,35 +52,12 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "Bumped to $NEW_VERSION"
 
-      - name: Build and publish
-        run: npm run build:release
+      - name: Build
+        run: npx tsc && npx vite build && npx electron-builder --win --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Clean up release assets
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="v$NEW_VERSION"
-          # Wait for release to exist
-          sleep 5
-          # Delete source archives that GitHub auto-attaches
-          for asset_id in $(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/meshtms/mesh-attendance/releases/tags/$TAG" \
-            | node -e "
-              const data=require('fs').readFileSync('/dev/stdin','utf-8');
-              const r=JSON.parse(data);
-              (r.assets||[]).forEach(a=>{
-                if(a.name.endsWith('.zip')||a.name.endsWith('.tar.gz')||a.name.endsWith('.blockmap'))
-                  console.log(a.id)
-              })
-            "); do
-            curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
-              "https://api.github.com/repos/meshtms/mesh-attendance/releases/assets/$asset_id"
-          done
-
-      - name: Commit version bump
+      - name: Commit version bump and tag
         shell: bash
         run: |
           git config user.name "github-actions"
@@ -89,3 +66,45 @@ jobs:
           git commit -m "v$NEW_VERSION"
           git tag "v$NEW_VERSION"
           git push && git push --tags
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$NEW_VERSION"
+          # Find the setup exe and latest.yml
+          SETUP_EXE=$(ls dist/*.exe 2>/dev/null | head -1)
+          LATEST_YML=$(ls dist/latest.yml 2>/dev/null | head -1)
+
+          # Create release with assets
+          RELEASE_ARGS="--tag $TAG --title $TAG --latest"
+          if [ -n "$SETUP_EXE" ]; then
+            RELEASE_ARGS="$RELEASE_ARGS $SETUP_EXE"
+          fi
+          if [ -n "$LATEST_YML" ]; then
+            RELEASE_ARGS="$RELEASE_ARGS $LATEST_YML"
+          fi
+
+          npx gh-release-cli create $RELEASE_ARGS 2>/dev/null || \
+          curl -s -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/meshtms/mesh-attendance/releases" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false}"
+
+          # Get release id and upload assets
+          RELEASE_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/meshtms/mesh-attendance/releases/tags/$TAG" \
+            | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).id")
+
+          for FILE in dist/*.exe dist/latest.yml; do
+            [ -f "$FILE" ] || continue
+            FILENAME=$(basename "$FILE")
+            echo "Uploading $FILENAME..."
+            curl -s -X POST \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$FILE" \
+              "https://uploads.github.com/repos/meshtms/mesh-attendance/releases/$RELEASE_ID/assets?name=$FILENAME"
+          done
