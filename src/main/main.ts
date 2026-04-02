@@ -9,6 +9,7 @@ function createWindow() {
   Menu.setApplicationMenu(null)
 
   mainWindow = new BrowserWindow({
+    title: `Casady Attendance v${app.getVersion()}`,
     width: 800,
     height: 600,
     webPreferences: {

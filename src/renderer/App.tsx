@@ -77,6 +77,16 @@ function App() {
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
             Casady Attendance
           </Typography>
+          {updateStatus?.status === 'available' && (
+            <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
+              Update v{updateStatus.version} found...
+            </Typography>
+          )}
+          {updateStatus?.status === 'error' && (
+            <Typography variant="body2" sx={{ mr: 2, color: 'error.main' }}>
+              Update error
+            </Typography>
+          )}
           {updateStatus?.status === 'downloading' && (
             <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
               Downloading update... {updateStatus.percent}%
