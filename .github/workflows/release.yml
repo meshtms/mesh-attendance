@@ -67,44 +67,93 @@ jobs:
           git tag "v$NEW_VERSION"
           git push && git push --tags
 
-      - name: Create GitHub Release
-        shell: bash
+      - name: Create GitHub Release and upload assets
+        shell: node {0}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ env.NEW_VERSION }}
         run: |
-          TAG="v$NEW_VERSION"
-          # Find the setup exe and latest.yml
-          SETUP_EXE=$(ls dist/*.exe 2>/dev/null | head -1)
-          LATEST_YML=$(ls dist/latest.yml 2>/dev/null | head -1)
+          const https = require('https');
+          const fs = require('fs');
+          const path = require('path');
 
-          # Create release with assets
-          RELEASE_ARGS="--tag $TAG --title $TAG --latest"
-          if [ -n "$SETUP_EXE" ]; then
-            RELEASE_ARGS="$RELEASE_ARGS $SETUP_EXE"
-          fi
-          if [ -n "$LATEST_YML" ]; then
-            RELEASE_ARGS="$RELEASE_ARGS $LATEST_YML"
-          fi
+          const token = process.env.GH_TOKEN;
+          const tag = `v${process.env.NEW_VERSION}`;
+          const repo = 'meshtms/mesh-attendance';
 
-          npx gh-release-cli create $RELEASE_ARGS 2>/dev/null || \
-          curl -s -X POST \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/meshtms/mesh-attendance/releases" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false}"
+          function api(method, endpoint, body) {
+            return new Promise((resolve, reject) => {
+              const isUpload = endpoint.startsWith('https://uploads.');
+              const url = isUpload ? new URL(endpoint) : new URL(`https://api.github.com${endpoint}`);
+              const opts = {
+                hostname: url.hostname,
+                path: url.pathname + url.search,
+                method,
+                headers: {
+                  'Authorization': `token ${token}`,
+                  'User-Agent': 'mesh-attendance-release',
+                  'Accept': 'application/vnd.github.v3+json',
+                },
+              };
+              if (body && !Buffer.isBuffer(body)) {
+                const json = JSON.stringify(body);
+                opts.headers['Content-Type'] = 'application/json';
+                opts.headers['Content-Length'] = Buffer.byteLength(json);
+                const req = https.request(opts, res => {
+                  let data = '';
+                  res.on('data', c => data += c);
+                  res.on('end', () => resolve(JSON.parse(data)));
+                });
+                req.on('error', reject);
+                req.write(json);
+                req.end();
+              } else if (Buffer.isBuffer(body)) {
+                opts.headers['Content-Type'] = 'application/octet-stream';
+                opts.headers['Content-Length'] = body.length;
+                const req = https.request(opts, res => {
+                  let data = '';
+                  res.on('data', c => data += c);
+                  res.on('end', () => resolve(JSON.parse(data)));
+                });
+                req.on('error', reject);
+                req.write(body);
+                req.end();
+              } else {
+                const req = https.request(opts, res => {
+                  let data = '';
+                  res.on('data', c => data += c);
+                  res.on('end', () => resolve(JSON.parse(data)));
+                });
+                req.on('error', reject);
+                req.end();
+              }
+            });
+          }
 
-          # Get release id and upload assets
-          RELEASE_ID=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/meshtms/mesh-attendance/releases/tags/$TAG" \
-            | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).id")
+          async function run() {
+            // Create release
+            console.log(`Creating release ${tag}...`);
+            const release = await api('POST', `/repos/${repo}/releases`, {
+              tag_name: tag,
+              name: tag,
+              draft: false,
+            });
+            console.log(`Release created: ${release.html_url}`);
 
-          for FILE in dist/*.exe dist/latest.yml; do
-            [ -f "$FILE" ] || continue
-            FILENAME=$(basename "$FILE")
-            echo "Uploading $FILENAME..."
-            curl -s -X POST \
-              -H "Authorization: token $GH_TOKEN" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$FILE" \
-              "https://uploads.github.com/repos/meshtms/mesh-attendance/releases/$RELEASE_ID/assets?name=$FILENAME"
-          done
+            // Find and upload assets
+            const distDir = path.join(process.cwd(), 'dist');
+            const files = fs.readdirSync(distDir).filter(f => f.endsWith('.exe') || f === 'latest.yml');
+
+            for (const file of files) {
+              const filePath = path.join(distDir, file);
+              const fileData = fs.readFileSync(filePath);
+              console.log(`Uploading ${file} (${(fileData.length / 1024 / 1024).toFixed(1)} MB)...`);
+              const uploadUrl = `https://uploads.github.com/repos/${repo}/releases/${release.id}/assets?name=${encodeURIComponent(file)}`;
+              await api('POST', uploadUrl, fileData);
+              console.log(`Uploaded ${file}`);
+            }
+
+            console.log('Done!');
+          }
+
+          run().catch(err => { console.error(err); process.exit(1); });
