@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { AppBar, Toolbar, Typography, Button, Box, TextField } from '@mui/material'
+import type { UpdateStatus } from '../shared/types'
 import { DataGrid, GridColDef, GridRowParams } from '@mui/x-data-grid'
 import type { StudentAbsence } from '../shared/types'
 import { useStudentAbsences } from './hooks/useStudentAbsences'
@@ -49,6 +50,11 @@ function App() {
   const [selectedStudent, setSelectedStudent] = useState<StudentAbsence | null>(null)
 
   const { syncing, syncMessage, sync } = useSync(reloadStudents)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+
+  useEffect(() => {
+    window.electronAPI.onUpdateStatus(setUpdateStatus)
+  }, [])
 
   const handleRowClick = useCallback((params: GridRowParams) => {
     const row = params.row as StudentAbsence & { id: number }
@@ -71,6 +77,22 @@ function App() {
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
             Casady Attendance
           </Typography>
+          {updateStatus?.status === 'downloading' && (
+            <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
+              Downloading update... {updateStatus.percent}%
+            </Typography>
+          )}
+          {updateStatus?.status === 'ready' && (
+            <Button
+              size="small"
+              variant="contained"
+              color="success"
+              sx={{ mr: 2 }}
+              onClick={() => window.electronAPI.installUpdate()}
+            >
+              Restart to Update
+            </Button>
+          )}
           {syncMessage && (
             <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
               {syncMessage}

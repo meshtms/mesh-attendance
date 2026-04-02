@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "build:release": "tsc && vite build && electron-builder --publish always",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -13,9 +14,41 @@
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.9",
     "@mui/x-data-grid": "^8.28.2",
+    "electron-updater": "^6.8.3",
     "papaparse": "^5.4.1",
     "recharts": "^3.8.1",
     "sql.js": "^1.10.0"
+  },
+  "build": {
+    "appId": "com.casady.attendance",
+    "productName": "Casady Attendance",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "meshtms",
+        "repo": "mesh-attendance"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
+    ]
   },
   "devDependencies": {
     "@types/papaparse": "^5.3.14",

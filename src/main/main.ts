@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
+import { autoUpdater } from 'electron-updater'
 import { initDatabase, importCSV, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords } from './database'
 
 let mainWindow: BrowserWindow | null = null
@@ -68,6 +69,34 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
+
+  // Auto-update (only in production builds)
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+
+    autoUpdater.on('update-available', (info) => {
+      mainWindow?.webContents.send('update-status', { status: 'available', version: info.version })
+    })
+
+    autoUpdater.on('download-progress', (progress) => {
+      mainWindow?.webContents.send('update-status', { status: 'downloading', percent: Math.round(progress.percent) })
+    })
+
+    autoUpdater.on('update-downloaded', () => {
+      mainWindow?.webContents.send('update-status', { status: 'ready' })
+    })
+
+    autoUpdater.on('error', (err) => {
+      mainWindow?.webContents.send('update-status', { status: 'error', message: err.message })
+    })
+
+    autoUpdater.checkForUpdates()
+  }
+
+  ipcMain.handle('install-update', () => {
+    autoUpdater.quitAndInstall()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -44,6 +44,15 @@ declare global {
       getStudentRecords: (firstName: string, lastName: string) => Promise<AbsenceRecord[]>
       getStudentCourseRecords: (firstName: string, lastName: string, course: string) => Promise<AbsenceRecord[]>
       getStudentReasonRecords: (firstName: string, lastName: string, reason: string) => Promise<AbsenceRecord[]>
+      onUpdateStatus: (callback: (status: UpdateStatus) => void) => void
+      installUpdate: () => Promise<void>
     }
   }
+}
+
+export interface UpdateStatus {
+  status: 'available' | 'downloading' | 'ready' | 'error'
+  version?: string
+  percent?: number
+  message?: string
 }
