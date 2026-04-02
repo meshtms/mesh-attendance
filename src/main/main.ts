@@ -24,6 +24,10 @@ function createWindow() {
   } else {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow?.setTitle(`Casady Attendance v${app.getVersion()}`)
+  })
 }
 
 app.whenReady().then(async () => {
@@ -94,6 +98,8 @@ app.whenReady().then(async () => {
 
     autoUpdater.checkForUpdates()
   }
+
+  ipcMain.handle('get-version', () => app.getVersion())
 
   ipcMain.handle('install-update', () => {
     autoUpdater.quitAndInstall()
