@@ -57,6 +57,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Clean up release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$NEW_VERSION"
+          # Wait for release to exist
+          sleep 5
+          # Delete source archives that GitHub auto-attaches
+          for asset_id in $(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/meshtms/mesh-attendance/releases/tags/$TAG" \
+            | node -e "
+              const data=require('fs').readFileSync('/dev/stdin','utf-8');
+              const r=JSON.parse(data);
+              (r.assets||[]).forEach(a=>{
+                if(a.name.endsWith('.zip')||a.name.endsWith('.tar.gz')||a.name.endsWith('.blockmap'))
+                  console.log(a.id)
+              })
+            "); do
+            curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/meshtms/mesh-attendance/releases/assets/$asset_id"
+          done
+
       - name: Commit version bump
         shell: bash
         run: |
