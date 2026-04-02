@@ -25,7 +25,7 @@ export async function initDatabase(): Promise<void> {
 
   // Migrate: add absence_value column if missing (existing databases)
   const cols = db.exec("PRAGMA table_info(attendance)")
-  const hasAbsenceValue = cols.length > 0 && cols[0].values.some((row) => row[1] === 'absence_value')
+  const hasAbsenceValue = cols.length > 0 && cols[0].values.some((row: unknown[]) => row[1] === 'absence_value')
   if (cols.length > 0 && !hasAbsenceValue) {
     db.run("ALTER TABLE attendance ADD COLUMN absence_value REAL NOT NULL DEFAULT 1.0")
     db.run("UPDATE attendance SET absence_value = 0.5 WHERE LOWER(reason) LIKE '%partial absence%'")
@@ -148,7 +148,7 @@ export function getStudentAbsences(): StudentAbsence[] {
 
   if (results.length === 0) return []
 
-  return results[0].values.map((row) => ({
+  return results[0].values.map((row: unknown[]) => ({
     student_first_name: row[0] as string,
     student_last_name: row[1] as string,
     total_absences: row[2] as number,
