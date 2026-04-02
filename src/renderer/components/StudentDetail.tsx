@@ -36,8 +36,6 @@ function StudentDetail({ student, onBack }: Props) {
     return (
       <DrillDetail
         student={student}
-        drillType={drill.type}
-        drillValue={drill.value}
         onBack={() => setDrill(null)}
       />
     )
