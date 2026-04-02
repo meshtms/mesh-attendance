@@ -99,12 +99,29 @@ function DrillDetail({ student, onBack }: Props) {
     [allRecords],
   )
 
+  const fallCutoff = useMemo(() => {
+    if (allRecords.length === 0) return ''
+    const dates = allRecords.map((r) => r.attendance_date).sort()
+    const minDate = dates[0]
+    const minYear = parseInt(minDate.substring(0, 4))
+    const minMonth = parseInt(minDate.substring(5, 7))
+    const fallYear = minMonth <= 7 ? minYear - 1 : minYear
+    return `${fallYear}-12-31`
+  }, [allRecords])
+
+  const semesterFilters = useToggleSet(new Set())
   const courseFilters = useToggleSet(new Set())
   const reasonFilters = useToggleSet(new Set())
   const statusFilters = useToggleSet(new Set())
 
   const filteredRecords = useMemo(() => {
     let result = allRecords
+    if (semesterFilters.selected.size === 1) {
+      if (semesterFilters.selected.has('Fall'))
+        result = result.filter((r) => r.attendance_date <= fallCutoff)
+      else if (semesterFilters.selected.has('Spring'))
+        result = result.filter((r) => r.attendance_date > fallCutoff)
+    }
     if (courseFilters.selected.size > 0)
       result = result.filter((r) => courseFilters.selected.has(r.course))
     if (reasonFilters.selected.size > 0)
@@ -112,7 +129,7 @@ function DrillDetail({ student, onBack }: Props) {
     if (statusFilters.selected.size > 0)
       result = result.filter((r) => statusFilters.selected.has(r.excused_unexcused))
     return result
-  }, [allRecords, courseFilters.selected, reasonFilters.selected, statusFilters.selected])
+  }, [allRecords, fallCutoff, semesterFilters.selected, courseFilters.selected, reasonFilters.selected, statusFilters.selected])
 
   const courseData = useMemo(
     () => buildGroupData(filteredRecords, 'course').sort((a, b) => b.value - a.value),
@@ -139,6 +156,18 @@ function DrillDetail({ student, onBack }: Props) {
 
       {/* Filter rows */}
       <Box sx={{ px: 3, pb: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', width: 52, flexShrink: 0 }}>
+            Semester
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+            {['Fall', 'Spring'].map((s) => (
+              <Box key={s} onClick={() => semesterFilters.toggle(s)} sx={toggleBtnSx(semesterFilters.selected.has(s))}>
+                {s}
+              </Box>
+            ))}
+          </Box>
+        </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', width: 52, flexShrink: 0 }}>
             Course
