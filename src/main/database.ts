@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import Papa from 'papaparse'
-import type { ImportResult, StudentAbsence, StudentCourseAbsence, StudentReasonAbsence, AbsenceRecord } from '../shared/types'
+import type { ImportResult, StudentAbsence, StudentCourseAbsence, StudentReasonAbsence, AbsenceRecord, Notification, NewNotification } from '../shared/types'
 
 let db: Database | null = null
 
@@ -31,6 +31,12 @@ export async function initDatabase(): Promise<void> {
     db.run("UPDATE attendance SET absence_value = 0.5 WHERE LOWER(reason) LIKE '%partial absence%'")
   }
 
+  // Migrate: add student_id column if missing (existing databases)
+  const hasStudentId = cols.length > 0 && cols[0].values.some((row: unknown[]) => row[1] === 'student_id')
+  if (cols.length > 0 && !hasStudentId) {
+    db.run("ALTER TABLE attendance ADD COLUMN student_id TEXT DEFAULT ''")
+  }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS attendance (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +50,8 @@ export async function initDatabase(): Promise<void> {
       meeting_time TEXT NOT NULL,
       head_teacher TEXT NOT NULL,
       excused_unexcused TEXT NOT NULL,
-      absence_value REAL NOT NULL DEFAULT 1.0
+      absence_value REAL NOT NULL DEFAULT 1.0,
+      student_id TEXT DEFAULT ''
     )
   `)
 
@@ -52,6 +59,24 @@ export async function initDatabase(): Promise<void> {
     CREATE TABLE IF NOT EXISTS excluded_reasons (
       reason TEXT PRIMARY KEY NOT NULL
     )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_first_name TEXT NOT NULL,
+      student_last_name TEXT NOT NULL,
+      student_id TEXT DEFAULT '',
+      notification_date TEXT NOT NULL,
+      threshold_value REAL NOT NULL,
+      comment TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_notifications_student
+    ON notifications (student_first_name, student_last_name)
   `)
 
   saveDatabase()
@@ -80,6 +105,8 @@ const COLUMNS = [
   'Excused/Unexcused',
 ] as const
 
+const STUDENT_ID_COLUMN = 'Student id'
+
 export async function importCSV(filePath: string): Promise<ImportResult> {
   if (!db) throw new Error('Database not initialized')
 
@@ -98,17 +125,18 @@ export async function importCSV(filePath: string): Promise<ImportResult> {
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO attendance
      (hash, attendance_date, reason, attendance_category, student_first_name,
-      student_last_name, course, meeting_time, head_teacher, excused_unexcused, absence_value)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      student_last_name, course, meeting_time, head_teacher, excused_unexcused, absence_value, student_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
 
   for (const row of parsed.data) {
     const values = COLUMNS.map((col) => row[col] ?? '')
+    const studentId = row[STUDENT_ID_COLUMN] ?? ''
     const hash = hashRow(values)
     const reason = (row['Reason'] ?? '').toLowerCase()
     const absenceValue = reason.includes('partial absence') ? 0.5 : 1.0
 
-    stmt.run([hash, ...values, absenceValue])
+    stmt.run([hash, ...values, absenceValue, studentId])
     const modified = db.getRowsModified()
     if (modified === 1) {
       inserted++
@@ -149,6 +177,8 @@ export function getStudentAbsences(): StudentAbsence[] {
   if (!cutoff) return []
 
   const excludeClause = getExcludedReasonsClause()
+  const subqueryExclude = excludeClause.replace(/AND /g, 'AND a2.')
+  const excludeCourses = `AND LOWER(a2.course) NOT LIKE '%study hall%' AND LOWER(a2.course) NOT LIKE '%chapel%' AND LOWER(a2.course) NOT LIKE '%lunch%'`
 
   const results = db.exec(`
     SELECT
@@ -156,7 +186,37 @@ export function getStudentAbsences(): StudentAbsence[] {
       student_last_name,
       SUM(absence_value) as total_absences,
       SUM(CASE WHEN attendance_date <= '${cutoff}' THEN absence_value ELSE 0 END) as fall_absences,
-      SUM(CASE WHEN attendance_date > '${cutoff}' THEN absence_value ELSE 0 END) as spring_absences
+      SUM(CASE WHEN attendance_date > '${cutoff}' THEN absence_value ELSE 0 END) as spring_absences,
+      MAX(student_id) as student_id,
+      (SELECT MAX(class_total) FROM (
+        SELECT SUM(a2.absence_value) as class_total
+        FROM attendance a2
+        WHERE a2.student_first_name = attendance.student_first_name
+          AND a2.student_last_name = attendance.student_last_name
+          ${subqueryExclude}
+          ${excludeCourses}
+        GROUP BY a2.course
+      )) as max_class_absences,
+      (SELECT MAX(class_total) FROM (
+        SELECT SUM(a2.absence_value) as class_total
+        FROM attendance a2
+        WHERE a2.student_first_name = attendance.student_first_name
+          AND a2.student_last_name = attendance.student_last_name
+          AND a2.attendance_date <= '${cutoff}'
+          ${subqueryExclude}
+          ${excludeCourses}
+        GROUP BY a2.course
+      )) as max_class_fall,
+      (SELECT MAX(class_total) FROM (
+        SELECT SUM(a2.absence_value) as class_total
+        FROM attendance a2
+        WHERE a2.student_first_name = attendance.student_first_name
+          AND a2.student_last_name = attendance.student_last_name
+          AND a2.attendance_date > '${cutoff}'
+          ${subqueryExclude}
+          ${excludeCourses}
+        GROUP BY a2.course
+      )) as max_class_spring
     FROM attendance
     WHERE 1=1 ${excludeClause}
     GROUP BY student_first_name, student_last_name
@@ -171,6 +231,10 @@ export function getStudentAbsences(): StudentAbsence[] {
     total_absences: row[2] as number,
     fall_absences: row[3] as number,
     spring_absences: row[4] as number,
+    student_id: (row[5] as string) || '',
+    max_class_absences: (row[6] as number) || 0,
+    max_class_fall: (row[7] as number) || 0,
+    max_class_spring: (row[8] as number) || 0,
   }))
 }
 
@@ -359,6 +423,68 @@ export function setExcludedReasons(reasons: string[]): void {
   for (const reason of reasons) {
     stmt.run([reason])
   }
+  stmt.free()
+  saveDatabase()
+}
+
+export function getStudentNotifications(firstName: string, lastName: string): Notification[] {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare(`
+    SELECT id, student_first_name, student_last_name, student_id, notification_date,
+           threshold_value, comment, created_at
+    FROM notifications
+    WHERE student_first_name = ? AND student_last_name = ?
+    ORDER BY notification_date DESC
+  `)
+
+  const rows: Notification[] = []
+  stmt.bind([firstName, lastName])
+  while (stmt.step()) {
+    const row = stmt.get()
+    rows.push({
+      id: row[0] as number,
+      student_first_name: row[1] as string,
+      student_last_name: row[2] as string,
+      student_id: (row[3] as string) || '',
+      notification_date: row[4] as string,
+      threshold_value: row[5] as number,
+      comment: (row[6] as string) || '',
+      created_at: row[7] as string,
+    })
+  }
+  stmt.free()
+
+  return rows
+}
+
+export function addNotification(notification: NewNotification): number {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare(`
+    INSERT INTO notifications (student_first_name, student_last_name, student_id, notification_date, threshold_value, comment)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `)
+  stmt.run([
+    notification.student_first_name,
+    notification.student_last_name,
+    notification.student_id || '',
+    notification.notification_date,
+    notification.threshold_value,
+    notification.comment || '',
+  ])
+  stmt.free()
+  saveDatabase()
+
+  const result = db.exec('SELECT last_insert_rowid()')
+  return result[0].values[0][0] as number
+}
+
+export function deleteNotification(id: number): void {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare('DELETE FROM notifications WHERE id = ?')
+  stmt.run([id])
   stmt.free()
   saveDatabase()
 }

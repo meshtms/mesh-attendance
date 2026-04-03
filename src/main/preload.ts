@@ -21,4 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   installUpdate: () => ipcRenderer.invoke('install-update'),
   getVersion: () => ipcRenderer.invoke('get-version'),
+  getStudentNotifications: (firstName: string, lastName: string) =>
+    ipcRenderer.invoke('get-student-notifications', firstName, lastName),
+  addNotification: (notification: { student_first_name: string; student_last_name: string; student_id?: string; notification_date: string; threshold_value: number; comment?: string }) =>
+    ipcRenderer.invoke('add-notification', notification),
+  deleteNotification: (id: number) => ipcRenderer.invoke('delete-notification', id),
 })

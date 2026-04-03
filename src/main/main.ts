@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getAllReasons, getExcludedReasons, setExcludedReasons } from './database'
+import { initDatabase, importCSV, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getAllReasons, getExcludedReasons, setExcludedReasons, getStudentNotifications, addNotification, deleteNotification } from './database'
+import type { NewNotification } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -83,6 +84,18 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('set-excluded-reasons', (_event, reasons: string[]) => {
     setExcludedReasons(reasons)
+  })
+
+  ipcMain.handle('get-student-notifications', (_event, firstName: string, lastName: string) => {
+    return getStudentNotifications(firstName, lastName)
+  })
+
+  ipcMain.handle('add-notification', (_event, notification: NewNotification) => {
+    return addNotification(notification)
+  })
+
+  ipcMain.handle('delete-notification', (_event, id: number) => {
+    deleteNotification(id)
   })
 
   createWindow()

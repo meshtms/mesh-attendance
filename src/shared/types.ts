@@ -10,6 +10,10 @@ export interface StudentAbsence {
   total_absences: number
   fall_absences: number
   spring_absences: number
+  student_id: string
+  max_class_absences: number
+  max_class_fall: number
+  max_class_spring: number
 }
 
 export interface StudentCourseAbsence {
@@ -50,6 +54,9 @@ declare global {
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => void
       installUpdate: () => Promise<void>
       getVersion: () => Promise<string>
+      getStudentNotifications: (firstName: string, lastName: string) => Promise<Notification[]>
+      addNotification: (notification: NewNotification) => Promise<number>
+      deleteNotification: (id: number) => Promise<void>
     }
   }
 }
@@ -59,4 +66,24 @@ export interface UpdateStatus {
   version?: string
   percent?: number
   message?: string
+}
+
+export interface Notification {
+  id: number
+  student_first_name: string
+  student_last_name: string
+  student_id: string
+  notification_date: string
+  threshold_value: number
+  comment: string
+  created_at: string
+}
+
+export interface NewNotification {
+  student_first_name: string
+  student_last_name: string
+  student_id?: string
+  notification_date: string
+  threshold_value: number
+  comment?: string
 }

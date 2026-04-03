@@ -1,11 +1,9 @@
-export const WARN_THRESHOLD = 5
-export const DANGER_THRESHOLD = 9
-
 export const COLOR_OK = '#4caf50'
 export const COLOR_WARN = '#fbc02d'
+export const COLOR_ORANGE = '#ef6c00'
 export const COLOR_DANGER = '#d32f2f'
 export const COLOR_EXCUSED = '#1976d2'
-export const COLOR_UNEXCUSED = '#ef6c00'
+export const COLOR_UNEXCUSED = '#b39ddb'
 
 export type ColorMode = 'threshold' | 'excused'
 
@@ -15,8 +13,9 @@ export interface ChartEntry {
 }
 
 function getThresholdColor(value: number) {
-  if (value >= DANGER_THRESHOLD) return COLOR_DANGER
-  if (value >= WARN_THRESHOLD) return COLOR_WARN
+  if (value >= 9.5) return COLOR_DANGER
+  if (value >= 7) return COLOR_ORANGE
+  if (value >= 5) return COLOR_WARN
   return COLOR_OK
 }
 
