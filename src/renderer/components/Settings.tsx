@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Box, Button, Typography, Checkbox, FormControlLabel } from '@mui/material'
+import { Box, Button, Typography, Checkbox, FormControlLabel, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions } from '@mui/material'
 
 interface Props {
   onBack: () => void
@@ -10,6 +10,8 @@ function Settings({ onBack, onSave }: Props) {
   const [allReasons, setAllReasons] = useState<string[]>([])
   const [excludedReasons, setExcludedReasons] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const [clearing, setClearing] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -35,6 +37,18 @@ function Settings({ onBack, onSave }: Props) {
     await window.electronAPI.setExcludedReasons([...excludedReasons])
     onSave()
     onBack()
+  }
+
+  const handleClearAttendance = async () => {
+    setClearing(true)
+    try {
+      await window.electronAPI.clearAttendance()
+      onSave()
+    } finally {
+      setClearing(false)
+      setConfirmClearOpen(false)
+      onBack()
+    }
   }
 
   if (loading) {
@@ -88,7 +102,45 @@ function Settings({ onBack, onSave }: Props) {
             ))}
           </Box>
         )}
+
+        <Box sx={{ mt: 4, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+            Reset Attendance Data
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Delete all imported attendance records. Notifications and excluded
+            reasons are kept. Use this if duplicates have appeared, then re-sync
+            from your CSV.
+          </Typography>
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            onClick={() => setConfirmClearOpen(true)}
+          >
+            Clear Attendance Data
+          </Button>
+        </Box>
       </Box>
+
+      <Dialog open={confirmClearOpen} onClose={() => !clearing && setConfirmClearOpen(false)}>
+        <DialogTitle>Clear all attendance data?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will permanently delete every imported attendance record. You
+            will need to re-sync from your CSV afterward. Notifications will not
+            be affected.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmClearOpen(false)} disabled={clearing}>
+            Cancel
+          </Button>
+          <Button onClick={handleClearAttendance} color="error" disabled={clearing}>
+            {clearing ? 'Clearing...' : 'Clear'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

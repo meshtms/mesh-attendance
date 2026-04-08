@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getAllReasons, getExcludedReasons, setExcludedReasons, getStudentNotifications, addNotification, deleteNotification } from './database'
+import { initDatabase, importCSV, clearAttendance, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getAllReasons, getExcludedReasons, setExcludedReasons, getStudentNotifications, addNotification, deleteNotification } from './database'
 import type { NewNotification } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -47,6 +47,27 @@ app.whenReady().then(async () => {
       return null
     }
 
+    return importCSV(result.filePaths[0])
+  })
+
+  ipcMain.handle('clear-attendance', () => {
+    clearAttendance()
+  })
+
+  ipcMain.handle('refresh-csv', async () => {
+    if (!mainWindow) return null
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Attendance CSV (Refresh)',
+      filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+      properties: ['openFile'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    clearAttendance()
     return importCSV(result.filePaths[0])
   })
 

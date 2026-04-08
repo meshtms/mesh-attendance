@@ -4,21 +4,34 @@ export function useSync(onSynced: () => void) {
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
-  const sync = useCallback(async () => {
-    setSyncing(true)
-    setSyncMessage(null)
-    try {
-      const result = await window.electronAPI.importCSV()
-      if (result) {
-        setSyncMessage(`${result.inserted} new, ${result.skipped} skipped`)
-        onSynced()
+  const run = useCallback(
+    async (mode: 'sync' | 'refresh') => {
+      setSyncing(true)
+      setSyncMessage(null)
+      try {
+        const result =
+          mode === 'refresh'
+            ? await window.electronAPI.refreshCSV()
+            : await window.electronAPI.importCSV()
+        if (result) {
+          setSyncMessage(
+            mode === 'refresh'
+              ? `Refreshed: ${result.inserted} loaded`
+              : `${result.inserted} new, ${result.skipped} skipped`,
+          )
+          onSynced()
+        }
+      } catch {
+        setSyncMessage(mode === 'refresh' ? 'Refresh failed' : 'Sync failed')
+      } finally {
+        setSyncing(false)
       }
-    } catch {
-      setSyncMessage('Sync failed')
-    } finally {
-      setSyncing(false)
-    }
-  }, [onSynced])
+    },
+    [onSynced],
+  )
 
-  return { syncing, syncMessage, sync }
+  const sync = useCallback(() => run('sync'), [run])
+  const refresh = useCallback(() => run('refresh'), [run])
+
+  return { syncing, syncMessage, sync, refresh }
 }

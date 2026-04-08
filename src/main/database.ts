@@ -79,6 +79,40 @@ export async function initDatabase(): Promise<void> {
     ON notifications (student_first_name, student_last_name)
   `)
 
+  // Migrate hash key (user_version 1): dedupe by new key and recompute hashes.
+  // The previous hash was computed over the full row (including columns like
+  // attendance_category and head_teacher) which meant minor upstream CSV
+  // formatting drift produced duplicate rows. New key is the natural identity:
+  // student + date + course + meeting_time + reason.
+  const versionResult = db.exec('PRAGMA user_version')
+  const userVersion =
+    versionResult.length > 0 ? Number(versionResult[0].values[0][0] ?? 0) : 0
+  if (userVersion < 1) {
+    db.run(`
+      DELETE FROM attendance WHERE id NOT IN (
+        SELECT MIN(id) FROM attendance
+        GROUP BY student_id, student_first_name, student_last_name,
+                 attendance_date, course, reason
+      )
+    `)
+    const rows = db.exec(`
+      SELECT id, student_id, student_first_name, student_last_name,
+             attendance_date, course, reason
+      FROM attendance
+    `)
+    if (rows.length > 0) {
+      const update = db.prepare('UPDATE attendance SET hash = ? WHERE id = ?')
+      for (const r of rows[0].values) {
+        const [id, sid, fn, ln, date, course, reason] = r as [
+          number, string, string, string, string, string, string,
+        ]
+        update.run([hashKey(sid, fn, ln, date, course, reason), id])
+      }
+      update.free()
+    }
+    db.run('PRAGMA user_version = 1')
+  }
+
   saveDatabase()
 }
 
@@ -88,8 +122,15 @@ function saveDatabase(): void {
   writeFileSync(getDbPath(), Buffer.from(data))
 }
 
-function hashRow(values: string[]): string {
-  const joined = values.join('\x1F')
+function hashKey(
+  studentId: string,
+  firstName: string,
+  lastName: string,
+  attendanceDate: string,
+  course: string,
+  reason: string,
+): string {
+  const joined = [studentId, firstName, lastName, attendanceDate, course, reason].join('\x1F')
   return createHash('sha256').update(joined).digest('hex')
 }
 
@@ -132,7 +173,14 @@ export async function importCSV(filePath: string): Promise<ImportResult> {
   for (const row of parsed.data) {
     const values = COLUMNS.map((col) => row[col] ?? '')
     const studentId = row[STUDENT_ID_COLUMN] ?? ''
-    const hash = hashRow(values)
+    const hash = hashKey(
+      studentId,
+      row['Student first name'] ?? '',
+      row['Student last name'] ?? '',
+      row['Attendance date'] ?? '',
+      row['Course'] ?? '',
+      row['Reason'] ?? '',
+    )
     const reason = (row['Reason'] ?? '').toLowerCase()
     const absenceValue = reason.includes('partial absence') ? 0.5 : 1.0
 
@@ -149,6 +197,12 @@ export async function importCSV(filePath: string): Promise<ImportResult> {
   saveDatabase()
 
   return { total, inserted, skipped }
+}
+
+export function clearAttendance(): void {
+  if (!db) throw new Error('Database not initialized')
+  db.run('DELETE FROM attendance')
+  saveDatabase()
 }
 
 function getFallCutoff(): string | null {

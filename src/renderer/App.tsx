@@ -8,6 +8,7 @@ import { useStudentAbsences } from './hooks/useStudentAbsences'
 import { useSync } from './hooks/useSync'
 import DrillDetail from './components/DrillDetail'
 import Settings from './components/Settings'
+import SyncButton from './components/SyncButton'
 import { COLOR_WARN, COLOR_ORANGE, COLOR_DANGER } from './components/chartColors'
 
 function formatNum(value: number): string {
@@ -123,7 +124,7 @@ function App() {
   ], [termFilter])
   const [thresholdFilter, setThresholdFilter] = useState<number | null>(null)
 
-  const { syncing, syncMessage, sync } = useSync(reloadStudents)
+  const { syncing, syncMessage, sync, refresh } = useSync(reloadStudents)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
 
   useEffect(() => {
@@ -220,9 +221,7 @@ function App() {
               {syncMessage}
             </Typography>
           )}
-          <Button variant="outlined" onClick={sync} disabled={syncing}>
-            {syncing ? 'Syncing...' : 'Sync Data'}
-          </Button>
+          <SyncButton syncing={syncing} onSync={sync} onRefresh={refresh} />
           <IconButton onClick={() => setShowSettings(true)} sx={{ ml: 1 }} title="Settings">
             <SettingsIcon />
           </IconButton>

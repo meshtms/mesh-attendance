@@ -42,6 +42,8 @@ declare global {
   interface Window {
     electronAPI: {
       importCSV: () => Promise<ImportResult | null>
+      refreshCSV: () => Promise<ImportResult | null>
+      clearAttendance: () => Promise<void>
       getStudentAbsences: () => Promise<StudentAbsence[]>
       getStudentCourseAbsences: (firstName: string, lastName: string) => Promise<StudentCourseAbsence[]>
       getStudentReasonAbsences: (firstName: string, lastName: string) => Promise<StudentReasonAbsence[]>

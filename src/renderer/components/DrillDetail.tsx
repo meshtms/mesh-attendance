@@ -299,9 +299,9 @@ function DrillDetail({ student }: Props) {
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, p: 2, gap: 2, overflow: 'hidden' }}>
         {/* First row - Term | Issue 1 | Issue 2 | Days */}
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          {/* Absences by Term - same width as Classes sidebar */}
-          <Box sx={{ width: 360, flexShrink: 0, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 3fr', gap: 2 }}>
+          {/* Absences by Term */}
+          <Box sx={{ borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
             {showHeadings && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
                 <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
@@ -311,7 +311,7 @@ function DrillDetail({ student }: Props) {
                 <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
               </Box>
             )}
-            <Box sx={{ display: 'flex', gap: 0.5, mb: 1.5 }}>
+            <Box sx={{ display: 'flex', gap: 0.5, mb: 2.5 }}>
               {([
                 { key: 'Fall' as const, label: 'Fall' },
                 { key: 'Spring' as const, label: 'Spring' },
@@ -351,78 +351,81 @@ function DrillDetail({ student }: Props) {
             </Box>
           </Box>
 
-          {/* Notifications */}
-          <Box sx={{ flex: 1 }}>
-            <NotificationHistory
-              studentFirstName={student.student_first_name}
-              studentLastName={student.student_last_name}
-              studentId={student.student_id}
-              showHeadings={showHeadings}
-            />
-          </Box>
+          {/* Right 3 panels */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2, minWidth: 0 }}>
+            {/* Notifications */}
+            <Box sx={{ minWidth: 0 }}>
+              <NotificationHistory
+                studentFirstName={student.student_first_name}
+                studentLastName={student.student_last_name}
+                studentId={student.student_id}
+                showHeadings={showHeadings}
+              />
+            </Box>
 
-          {/* Issue Area 2 - placeholder */}
-          <Box sx={{ flex: 1, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
-            {showHeadings && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-                <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-                <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                  Issue Area 2
-                </Typography>
-                <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-              </Box>
-            )}
-          </Box>
+            {/* Issue Area 2 - placeholder */}
+            <Box sx={{ minWidth: 0, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
+              {showHeadings && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
+                  <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
+                    Issue Area 2
+                  </Typography>
+                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
+                </Box>
+              )}
+            </Box>
 
-          {/* Absences by Day - shares space with issue areas */}
-          <Box sx={{ flex: 1, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
-            {showHeadings && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-                <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-                <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                  Absences by Day
-                </Typography>
-                <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-              </Box>
-            )}
-            <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', minHeight: 70 }}>
-              {dayOfWeekData.map((d, i) => (
-                <Tooltip key={i} title={d.full} arrow>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-                    <Box
-                      sx={{
-                        width: d.size,
-                        height: d.size,
-                        borderRadius: '50%',
-                        backgroundColor: d.color || 'grey.300',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'all 0.2s',
-                      }}
-                    >
-                      <Typography sx={{
-                        fontSize: d.size * 0.35,
-                        fontWeight: 600,
-                        color: '#fff',
-                        fontVariantNumeric: 'tabular-nums',
-                      }}>
-                        {formatNum(d.count)}
+            {/* Absences by Day */}
+            <Box sx={{ minWidth: 0, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
+              {showHeadings && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
+                  <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
+                    Absences by Day
+                  </Typography>
+                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
+                </Box>
+              )}
+              <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', minHeight: 70 }}>
+                {dayOfWeekData.map((d, i) => (
+                  <Tooltip key={i} title={d.full} arrow>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                      <Box
+                        sx={{
+                          width: d.size,
+                          height: d.size,
+                          borderRadius: '50%',
+                          backgroundColor: d.color || 'grey.300',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        <Typography sx={{
+                          fontSize: d.size * 0.35,
+                          fontWeight: 600,
+                          color: '#fff',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {formatNum(d.count)}
+                        </Typography>
+                      </Box>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                        {d.label}
                       </Typography>
                     </Box>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-                      {d.label}
-                    </Typography>
-                  </Box>
-                </Tooltip>
-              ))}
+                  </Tooltip>
+                ))}
+              </Box>
             </Box>
           </Box>
         </Box>
 
         {/* Second row */}
-        <Box sx={{ flex: 1, display: 'flex', minHeight: 0, gap: 2 }}>
-          <Box sx={{ width: 360, flexShrink: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Box sx={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 3fr', minHeight: 0, gap: 2 }}>
+          <Box sx={{ minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {/* Course list */}
           {courseData.length > 0 && (
             <Box sx={{ flex: 1, minHeight: 0, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2, pr: 1, display: 'flex', flexDirection: 'column' }}>
@@ -435,7 +438,7 @@ function DrillDetail({ student }: Props) {
                   <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                 </Box>
               )}
-              <Box sx={{ display: 'flex', gap: 0.5, mb: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 0.5, mb: 2.5 }}>
                 <Box onClick={selectAllClasses} sx={{ ...toggleBtnSx(isAllSelected), flex: 1, textAlign: 'center' }}>All</Box>
                 <Box onClick={openSingleSelect} sx={{ ...toggleBtnSx(isOneSelected), flex: 1, textAlign: 'center' }}>One</Box>
                 <Box onClick={openMultiSelect} sx={{ ...toggleBtnSx(!isAllSelected && !isOneSelected), flex: 1, textAlign: 'center' }}>Some</Box>
@@ -507,7 +510,7 @@ function DrillDetail({ student }: Props) {
           </Box>
 
         </Box>
-        <Box sx={{ flex: 1, minHeight: 0 }}>
+        <Box sx={{ minHeight: 0, minWidth: 0 }}>
           <DataGrid
             rows={rows}
             columns={columns}
