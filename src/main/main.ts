@@ -1,16 +1,20 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, clearAttendance, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getAllReasons, getExcludedReasons, setExcludedReasons, getStudentNotifications, addNotification, deleteNotification } from './database'
-import type { NewNotification } from '../shared/types'
+import { initDatabase, importCSV, clearAttendance, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from './database'
+import type { CategoryType, CategoryTypeAssignment, ExcludedReason, NewNotification } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
+
+// Demo/preview builds ship under their own product name and app id so they can
+// sit alongside a real install. They must never talk to the release feed.
+const IS_PREVIEW = app.getName().toLowerCase().includes('preview')
 
 function createWindow() {
   Menu.setApplicationMenu(null)
 
   mainWindow = new BrowserWindow({
-    title: `Casady Attendance v${app.getVersion()}`,
+    title: `${app.getName()} v${app.getVersion()}`,
     width: 800,
     height: 600,
     webPreferences: {
@@ -27,7 +31,7 @@ function createWindow() {
   }
 
   mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow?.setTitle(`Casady Attendance v${app.getVersion()}`)
+    mainWindow?.setTitle(`${app.getName()} v${app.getVersion()}`)
   })
 }
 
@@ -83,8 +87,8 @@ app.whenReady().then(async () => {
     return getStudentReasonAbsences(firstName, lastName)
   })
 
-  ipcMain.handle('get-student-records', (_event, firstName: string, lastName: string) => {
-    return getStudentRecords(firstName, lastName)
+  ipcMain.handle('get-student-records', (_event, firstName: string, lastName: string, type: CategoryType) => {
+    return getStudentRecords(firstName, lastName, type)
   })
 
   ipcMain.handle('get-student-course-records', (_event, firstName: string, lastName: string, course: string) => {
@@ -95,16 +99,20 @@ app.whenReady().then(async () => {
     return getStudentReasonRecords(firstName, lastName, reason)
   })
 
-  ipcMain.handle('get-all-reasons', () => {
-    return getAllReasons()
+  ipcMain.handle('get-category-tree', () => {
+    return getCategoryTree()
   })
 
   ipcMain.handle('get-excluded-reasons', () => {
     return getExcludedReasons()
   })
 
-  ipcMain.handle('set-excluded-reasons', (_event, reasons: string[]) => {
+  ipcMain.handle('set-excluded-reasons', (_event, reasons: ExcludedReason[]) => {
     setExcludedReasons(reasons)
+  })
+
+  ipcMain.handle('set-category-types', (_event, types: CategoryTypeAssignment[]) => {
+    setCategoryTypes(types)
   })
 
   ipcMain.handle('get-student-notifications', (_event, firstName: string, lastName: string) => {
@@ -121,8 +129,8 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Auto-update (only in production builds)
-  if (!process.env.VITE_DEV_SERVER_URL) {
+  // Auto-update (production builds only, never preview builds)
+  if (!process.env.VITE_DEV_SERVER_URL && !IS_PREVIEW) {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
 

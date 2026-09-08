@@ -1,0 +1,19 @@
+# Standalone installer for showing work-in-progress branches (e.g. tardy).
+# Its own appId + productName means it installs alongside the real app, keeps a
+# separate database, and never publishes to the release feed.
+appId: com.casady.attendance.preview
+productName: Casady Attendance Preview
+directories:
+  output: dist-demo
+win:
+  target: nsis
+nsis:
+  oneClick: true
+  perMachine: false
+files:
+  - dist/**/*
+  - dist-electron/**/*
+extraResources:
+  - from: node_modules/sql.js/dist/sql-wasm.wasm
+    to: sql-wasm.wasm
+publish: null

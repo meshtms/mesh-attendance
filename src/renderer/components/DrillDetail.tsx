@@ -4,7 +4,8 @@ import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid'
 import { useStudentRecords } from '../hooks/useStudentRecords'
 import { getColor, COLOR_EXCUSED, COLOR_UNEXCUSED, type ChartEntry } from './chartColors'
 import NotificationHistory from './NotificationHistory'
-import type { StudentAbsence, AbsenceRecord } from '../../shared/types'
+import type { StudentAbsence, AbsenceRecord, CategoryType } from '../../shared/types'
+import { GROUP_ABSENCE, GROUP_TARDY } from './gridStyles'
 
 interface Props {
   student: StudentAbsence
@@ -21,19 +22,22 @@ function renderStatus(params: GridRenderCellParams) {
   )
 }
 
-const columns: GridColDef[] = [
+const BASE_COLUMNS: GridColDef[] = [
   { field: 'attendance_date', headerName: 'Date', width: 120 },
   { field: 'course', headerName: 'Course', width: 180 },
   { field: 'reason', headerName: 'Reason', flex: 1, minWidth: 160 },
   { field: 'excused_unexcused', headerName: 'Status', width: 140, renderCell: renderStatus },
-  {
-    field: 'absence_value',
-    headerName: 'Value',
-    width: 80,
-    type: 'number',
-    valueFormatter: (value: number | null) => value != null ? value.toFixed(1) : '',
-  },
 ]
+
+// Every tardy is worth 1, so the value column only earns its space for
+// absences, where half-days appear.
+const VALUE_COLUMN: GridColDef = {
+  field: 'absence_value',
+  headerName: 'Value',
+  width: 80,
+  type: 'number',
+  valueFormatter: (value: number | null) => (value != null ? value.toFixed(1) : ''),
+}
 
 function buildGroupData(records: AbsenceRecord[], groupBy: 'course' | 'reason' | 'excused_unexcused') {
   return Object.values(
@@ -84,25 +88,45 @@ function useToggleSet(initial: Set<string>) {
 }
 
 function DrillDetail({ student }: Props) {
-  const { records: allRecords } = useStudentRecords(
+  // Both buckets are loaded up front: switching views is instant, and the view
+  // that is not on screen still supplies the counterpart metric in the header.
+  const [view, setView] = useState<CategoryType>('ABSENCE')
+  const { records: absenceRecords } = useStudentRecords(
     student.student_first_name,
     student.student_last_name,
+    'ABSENCE',
   )
+  const { records: tardyRecords } = useStudentRecords(
+    student.student_first_name,
+    student.student_last_name,
+    'TARDY',
+  )
+
+  const isAbsenceView = view === 'ABSENCE'
+  const allRecords = isAbsenceView ? absenceRecords : tardyRecords
+  const otherRecords = isAbsenceView ? tardyRecords : absenceRecords
+  const label = isAbsenceView ? 'Absences' : 'Tardies'
+  const otherLabel = isAbsenceView ? 'Tardies' : 'Absences'
+  const accent = isAbsenceView ? GROUP_ABSENCE.accent : GROUP_TARDY.accent
+  const otherAccent = isAbsenceView ? GROUP_TARDY.accent : GROUP_ABSENCE.accent
 
   const allCourses = useMemo(
     () => [...new Set(allRecords.map((r) => r.course))].sort(),
     [allRecords],
   )
 
+  // Derived from both buckets so the term split does not shift between views.
   const fallCutoff = useMemo(() => {
-    if (allRecords.length === 0) return ''
-    const dates = allRecords.map((r) => r.attendance_date).sort()
+    const dates = [...absenceRecords, ...tardyRecords]
+      .map((r) => r.attendance_date)
+      .sort()
+    if (dates.length === 0) return ''
     const minDate = dates[0]
     const minYear = parseInt(minDate.substring(0, 4))
     const minMonth = parseInt(minDate.substring(5, 7))
     const fallYear = minMonth <= 7 ? minYear - 1 : minYear
     return `${fallYear}-12-31`
-  }, [allRecords])
+  }, [absenceRecords, tardyRecords])
 
   // Determine current semester based on today's date (Aug-Dec = Fall, Jan-Jul = Spring)
   const currentSemester = useMemo(() => {
@@ -137,11 +161,13 @@ function DrillDetail({ student }: Props) {
     setSelectedCourses(getCoursesForTerm(term))
   }, [getCoursesForTerm])
 
-  // Initialize selectedCourses with all courses when they load
+  // Keep whatever selection still applies (switching views changes the course
+  // set), otherwise fall back to everything.
   useEffect(() => {
-    if (allCourses.length > 0 && selectedCourses.length === 0) {
-      setSelectedCourses(allCourses)
-    }
+    setSelectedCourses((prev) => {
+      const stillValid = prev.filter((c) => allCourses.includes(c))
+      return stillValid.length > 0 ? stillValid : allCourses
+    })
   }, [allCourses])
 
   const openSingleSelect = () => {
@@ -203,16 +229,21 @@ function DrillDetail({ student }: Props) {
   const reasonColorMode = 'excused' as const
   const statusData = buildGroupData(filteredRecords, 'excused_unexcused')
 
-  const termTotals = useMemo(() => {
-    const fallTotal = allRecords
+  const termTotalsFor = useCallback((records: AbsenceRecord[]) => ({
+    fall: records
       .filter((r) => r.attendance_date <= fallCutoff)
-      .reduce((s, r) => s + r.absence_value, 0)
-    const springTotal = allRecords
+      .reduce((s, r) => s + r.absence_value, 0),
+    spring: records
       .filter((r) => r.attendance_date > fallCutoff)
-      .reduce((s, r) => s + r.absence_value, 0)
-    const yearTotal = allRecords.reduce((s, r) => s + r.absence_value, 0)
-    return { fall: fallTotal, spring: springTotal, year: yearTotal }
-  }, [allRecords, fallCutoff])
+      .reduce((s, r) => s + r.absence_value, 0),
+    year: records.reduce((s, r) => s + r.absence_value, 0),
+  }), [fallCutoff])
+
+  const termTotals = useMemo(() => termTotalsFor(allRecords), [termTotalsFor, allRecords])
+  const otherTermTotals = useMemo(
+    () => termTotalsFor(otherRecords),
+    [termTotalsFor, otherRecords],
+  )
 
   const dayOfWeekData = useMemo(() => {
     const days = [
@@ -248,6 +279,10 @@ function DrillDetail({ student }: Props) {
   }, [filteredRecords])
 
   const rows = filteredRecords.map((r, i) => ({ id: i, ...r }))
+  const columns = useMemo(
+    () => (isAbsenceView ? [...BASE_COLUMNS, VALUE_COLUMN] : BASE_COLUMNS),
+    [isAbsenceView],
+  )
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -258,6 +293,10 @@ function DrillDetail({ student }: Props) {
           </Typography>
           <Typography variant="h6" sx={{ color: 'text.disabled' }}>|</Typography>
           <Typography variant="h6" sx={{ color: 'text.secondary', fontWeight: 400 }}>
+            {label}
+          </Typography>
+          <Typography variant="h6" sx={{ color: 'text.disabled' }}>|</Typography>
+          <Typography variant="h6" sx={{ color: 'text.secondary', fontWeight: 400 }}>
             {semesterFilter}
           </Typography>
           <Typography variant="h6" sx={{ color: 'text.disabled' }}>|</Typography>
@@ -265,6 +304,7 @@ function DrillDetail({ student }: Props) {
             {isAllSelected ? 'All Classes' : isOneSelected ? selectedCourses[0] : 'Selected Classes'}
           </Typography>
         </Box>
+
       </Box>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
@@ -298,15 +338,15 @@ function DrillDetail({ student }: Props) {
       </Dialog>
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, p: 2, gap: 2, overflow: 'hidden' }}>
-        {/* First row - Term | Issue 1 | Issue 2 | Days */}
+        {/* First row - Term | Notifications | Days | Counterpart bucket */}
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 3fr', gap: 2 }}>
-          {/* Absences by Term */}
+          {/* Active bucket totals by term */}
           <Box sx={{ borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
             {showHeadings && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
                 <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                 <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                  Absences by Term
+                  {label} by Term
                 </Typography>
                 <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
               </Box>
@@ -342,7 +382,7 @@ function DrillDetail({ student }: Props) {
                     fontWeight: 600,
                     lineHeight: 1,
                     fontVariantNumeric: 'tabular-nums',
-                    color: semesterFilter === t.key ? 'primary.main' : 'text.secondary',
+                    color: semesterFilter === t.key ? accent : 'text.secondary',
                   }}>
                     {formatNum(t.value)}
                   </Typography>
@@ -363,26 +403,13 @@ function DrillDetail({ student }: Props) {
               />
             </Box>
 
-            {/* Issue Area 2 - placeholder */}
+            {/* Absences (or tardies) by day of week */}
             <Box sx={{ minWidth: 0, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
               {showHeadings && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
                   <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                   <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                    Issue Area 2
-                  </Typography>
-                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-                </Box>
-              )}
-            </Box>
-
-            {/* Absences by Day */}
-            <Box sx={{ minWidth: 0, borderRadius: 1, backgroundColor: 'background.paper', border: '1px solid', borderColor: 'divider', p: 2 }}>
-              {showHeadings && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-                  <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
-                  <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                    Absences by Day
+                    {label} by Day
                   </Typography>
                   <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                 </Box>
@@ -420,6 +447,57 @@ function DrillDetail({ student }: Props) {
                 ))}
               </Box>
             </Box>
+            {/* Counterpart bucket totals - click to switch views */}
+            <Tooltip title={`Switch to ${otherLabel.toLowerCase()}`} arrow>
+              <Box
+                onClick={() => setView(isAbsenceView ? 'TARDY' : 'ABSENCE')}
+                sx={{
+                  minWidth: 0,
+                  borderRadius: 1,
+                  backgroundColor: 'background.paper',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  p: 2,
+                  cursor: 'pointer',
+                  transition: 'border-color 0.15s',
+                  '&:hover': { borderColor: otherAccent },
+                }}
+              >
+                {showHeadings && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+                    <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
+                    <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
+                      {otherLabel} by Term
+                    </Typography>
+                    <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
+                  </Box>
+                )}
+                <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', minHeight: 70 }}>
+                  {([
+                    { key: 'Fall', value: otherTermTotals.fall },
+                    { key: 'Spring', value: otherTermTotals.spring },
+                    { key: 'Year', value: otherTermTotals.year },
+                  ]).map((t) => (
+                    <Box key={t.key} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <Typography
+                        sx={{
+                          fontSize: '1.75rem',
+                          fontWeight: 600,
+                          lineHeight: 1,
+                          fontVariantNumeric: 'tabular-nums',
+                          color: t.value > 0 ? otherAccent : 'text.disabled',
+                        }}
+                      >
+                        {formatNum(t.value)}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                        {t.key}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            </Tooltip>
           </Box>
         </Box>
 
@@ -433,7 +511,7 @@ function DrillDetail({ student }: Props) {
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
                   <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                   <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                    Absences by Class
+                    {label} by Class
                   </Typography>
                   <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                 </Box>
@@ -449,7 +527,7 @@ function DrillDetail({ student }: Props) {
                   return courseData.map((d) => (
                     <Box key={d.name} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                       <Box sx={{ width: 90, height: 14, backgroundColor: 'grey.200', borderRadius: '2px', flexShrink: 0, overflow: 'hidden' }}>
-                        <Box sx={{ width: `${(d.value / maxVal) * 100}%`, height: '100%', backgroundColor: getColor(d, 'threshold'), borderRadius: '2px' }} />
+                        <Box sx={{ width: `${(d.value / maxVal) * 100}%`, height: '100%', backgroundColor: isAbsenceView ? getColor(d, 'threshold') : accent, borderRadius: '2px' }} />
                       </Box>
                       <Tooltip title={d.name} arrow disableHoverListener={d.name.length < 25}>
                         <Typography variant="body2" sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</Typography>
@@ -470,7 +548,7 @@ function DrillDetail({ student }: Props) {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
                 <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
                 <Typography variant="h6" sx={{ fontWeight: 400, color: 'text.secondary', fontSize: '1rem' }}>
-                  Absence Reasons
+                  {isAbsenceView ? 'Absence' : 'Tardy'} Reasons
                 </Typography>
                 <Box sx={{ flex: 1, height: '1px', backgroundColor: 'divider' }} />
               </Box>

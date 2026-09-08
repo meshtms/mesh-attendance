@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
 import Papa from 'papaparse'
-import type { ImportResult, StudentAbsence, StudentCourseAbsence, StudentReasonAbsence, AbsenceRecord, Notification, NewNotification } from '../shared/types'
+import type { CategoryInfo, CategoryType, CategoryTypeAssignment, ExcludedReason, ImportResult, StudentAbsence, StudentCourseAbsence, StudentReasonAbsence, AbsenceRecord, Notification, NewNotification } from '../shared/types'
 
 let db: Database | null = null
 
@@ -57,7 +57,16 @@ export async function initDatabase(): Promise<void> {
 
   db.run(`
     CREATE TABLE IF NOT EXISTS excluded_reasons (
-      reason TEXT PRIMARY KEY NOT NULL
+      attendance_category TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      PRIMARY KEY (attendance_category, reason)
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS categories (
+      category TEXT PRIMARY KEY NOT NULL,
+      type TEXT NOT NULL DEFAULT 'ABSENCE'
     )
   `)
 
@@ -111,6 +120,39 @@ export async function initDatabase(): Promise<void> {
       update.free()
     }
     db.run('PRAGMA user_version = 1')
+  }
+
+  // Category-scoped exclusions (user_version 2): the school began emitting a
+  // "Tardy" category whose reasons ("Illness", "Medical Appt", ...) collide with
+  // real absence reasons, so a reason-only exclusion could not separate them.
+  // Existing exclusions expand to every category that uses that reason, which
+  // preserves what the user had configured before the split.
+  if (userVersion < 2) {
+    const exCols = db.exec('PRAGMA table_info(excluded_reasons)')
+    const exScoped =
+      exCols.length > 0 &&
+      exCols[0].values.some((row: unknown[]) => row[1] === 'attendance_category')
+    if (exCols.length > 0 && !exScoped) {
+      const old = db.exec('SELECT reason FROM excluded_reasons')
+      const oldReasons =
+        old.length > 0 ? old[0].values.map((row: unknown[]) => row[0] as string) : []
+      db.run('DROP TABLE excluded_reasons')
+      db.run(`
+        CREATE TABLE excluded_reasons (
+          attendance_category TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          PRIMARY KEY (attendance_category, reason)
+        )
+      `)
+      const expand = db.prepare(`
+        INSERT OR IGNORE INTO excluded_reasons (attendance_category, reason)
+        SELECT DISTINCT attendance_category, reason FROM attendance WHERE reason = ?
+      `)
+      for (const reason of oldReasons) expand.run([reason])
+      expand.free()
+    }
+    seedCategories()
+    db.run('PRAGMA user_version = 2')
   }
 
   saveDatabase()
@@ -194,6 +236,7 @@ export async function importCSV(filePath: string): Promise<ImportResult> {
   }
 
   stmt.free()
+  seedCategories()
   saveDatabase()
 
   return { total, inserted, skipped }
@@ -216,12 +259,71 @@ function getFallCutoff(): string | null {
   return `${fallYear}-12-31`
 }
 
-function getExcludedReasonsClause(): string {
+// Joins a category to a reason to form the exclusion key. Unit separator can
+// not occur inside a CSV field, so the composite key is unambiguous.
+const CATEGORY_SEPARATOR = '\x1F'
+
+// New categories default to ABSENCE so an upstream addition never silently
+// vanishes from the totals; the user re-types it in Settings.
+function seedCategories(): void {
+  if (!db) return
+  db.run(`
+    INSERT OR IGNORE INTO categories (category, type)
+    SELECT DISTINCT attendance_category, 'ABSENCE' FROM attendance
+    WHERE attendance_category IS NOT NULL
+  `)
+}
+
+function sqlQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+/** Membership test: the row's category is typed for this bucket. */
+function typeClause(type: CategoryType, alias = ''): string {
+  const col = alias ? `${alias}.` : ''
+  return `${col}attendance_category IN (SELECT category FROM categories WHERE type = ${sqlQuote(type)})`
+}
+
+/** Drops (category, reason) pairs the user excluded in Settings. */
+function exclusionClause(alias = ''): string {
   if (!db) return ''
-  const results = db.exec(`SELECT reason FROM excluded_reasons`)
+  const col = alias ? `${alias}.` : ''
+  const results = db.exec(`SELECT attendance_category, reason FROM excluded_reasons`)
   if (results.length === 0 || results[0].values.length === 0) return ''
-  const reasons = results[0].values.map((row: unknown[]) => (row[0] as string).replace(/'/g, "''"))
-  return `AND reason NOT IN ('${reasons.join("','")}')`
+  const pairs = results[0].values
+    .map((row: unknown[]) => sqlQuote(`${row[0] as string}${CATEGORY_SEPARATOR}${row[1] as string}`))
+    .join(',')
+  return ` AND (${col}attendance_category || ${sqlQuote(CATEGORY_SEPARATOR)} || ${col}reason) NOT IN (${pairs})`
+}
+
+/**
+ * Rows that count toward a bucket: the row's category must be typed for that
+ * bucket, and its (category, reason) pair must not be excluded. `alias` scopes
+ * the columns when the clause is spliced into a correlated subquery.
+ */
+function buildFilterClause(type: CategoryType = 'ABSENCE', alias = ''): string {
+  if (!db) return ''
+  return ` AND ${typeClause(type, alias)}${exclusionClause(alias)}`
+}
+
+/**
+ * Heaviest single course for one student in a bucket. Homeroom-style courses
+ * are ignored because a student missing a whole day always misses those.
+ */
+function maxClassSubquery(type: CategoryType, dateClause: string): string {
+  return `(SELECT MAX(class_total) FROM (
+        SELECT SUM(a2.absence_value) as class_total
+        FROM attendance a2
+        WHERE a2.student_first_name = attendance.student_first_name
+          AND a2.student_last_name = attendance.student_last_name
+          AND ${typeClause(type, 'a2')}
+          ${dateClause}
+          ${exclusionClause('a2')}
+          AND LOWER(a2.course) NOT LIKE '%study hall%'
+          AND LOWER(a2.course) NOT LIKE '%chapel%'
+          AND LOWER(a2.course) NOT LIKE '%lunch%'
+        GROUP BY a2.course
+      ))`
 }
 
 export function getStudentAbsences(): StudentAbsence[] {
@@ -230,49 +332,29 @@ export function getStudentAbsences(): StudentAbsence[] {
   const cutoff = getFallCutoff()
   if (!cutoff) return []
 
-  const excludeClause = getExcludedReasonsClause()
-  const subqueryExclude = excludeClause.replace(/AND /g, 'AND a2.')
-  const excludeCourses = `AND LOWER(a2.course) NOT LIKE '%study hall%' AND LOWER(a2.course) NOT LIKE '%chapel%' AND LOWER(a2.course) NOT LIKE '%lunch%'`
+  const exclude = exclusionClause()
+  // Absences and tardies are summed from the same rows in one pass so a student
+  // with only tardies still appears in the grid.
+  const bucketSums = (type: CategoryType) => {
+    const member = typeClause(type)
+    return `
+      SUM(CASE WHEN ${member} THEN absence_value ELSE 0 END),
+      SUM(CASE WHEN ${member} AND attendance_date <= '${cutoff}' THEN absence_value ELSE 0 END),
+      SUM(CASE WHEN ${member} AND attendance_date > '${cutoff}' THEN absence_value ELSE 0 END),
+      ${maxClassSubquery(type, '')},
+      ${maxClassSubquery(type, `AND a2.attendance_date <= '${cutoff}'`)},
+      ${maxClassSubquery(type, `AND a2.attendance_date > '${cutoff}'`)}`
+  }
 
   const results = db.exec(`
     SELECT
       student_first_name,
       student_last_name,
-      SUM(absence_value) as total_absences,
-      SUM(CASE WHEN attendance_date <= '${cutoff}' THEN absence_value ELSE 0 END) as fall_absences,
-      SUM(CASE WHEN attendance_date > '${cutoff}' THEN absence_value ELSE 0 END) as spring_absences,
-      MAX(student_id) as student_id,
-      (SELECT MAX(class_total) FROM (
-        SELECT SUM(a2.absence_value) as class_total
-        FROM attendance a2
-        WHERE a2.student_first_name = attendance.student_first_name
-          AND a2.student_last_name = attendance.student_last_name
-          ${subqueryExclude}
-          ${excludeCourses}
-        GROUP BY a2.course
-      )) as max_class_absences,
-      (SELECT MAX(class_total) FROM (
-        SELECT SUM(a2.absence_value) as class_total
-        FROM attendance a2
-        WHERE a2.student_first_name = attendance.student_first_name
-          AND a2.student_last_name = attendance.student_last_name
-          AND a2.attendance_date <= '${cutoff}'
-          ${subqueryExclude}
-          ${excludeCourses}
-        GROUP BY a2.course
-      )) as max_class_fall,
-      (SELECT MAX(class_total) FROM (
-        SELECT SUM(a2.absence_value) as class_total
-        FROM attendance a2
-        WHERE a2.student_first_name = attendance.student_first_name
-          AND a2.student_last_name = attendance.student_last_name
-          AND a2.attendance_date > '${cutoff}'
-          ${subqueryExclude}
-          ${excludeCourses}
-        GROUP BY a2.course
-      )) as max_class_spring
+      MAX(student_id),
+      ${bucketSums('ABSENCE')},
+      ${bucketSums('TARDY')}
     FROM attendance
-    WHERE 1=1 ${excludeClause}
+    WHERE 1=1 ${exclude}
     GROUP BY student_first_name, student_last_name
     ORDER BY student_last_name, student_first_name
   `)
@@ -282,13 +364,19 @@ export function getStudentAbsences(): StudentAbsence[] {
   return results[0].values.map((row: unknown[]) => ({
     student_first_name: row[0] as string,
     student_last_name: row[1] as string,
-    total_absences: row[2] as number,
-    fall_absences: row[3] as number,
-    spring_absences: row[4] as number,
-    student_id: (row[5] as string) || '',
+    student_id: (row[2] as string) || '',
+    total_absences: (row[3] as number) || 0,
+    fall_absences: (row[4] as number) || 0,
+    spring_absences: (row[5] as number) || 0,
     max_class_absences: (row[6] as number) || 0,
     max_class_fall: (row[7] as number) || 0,
     max_class_spring: (row[8] as number) || 0,
+    total_tardies: (row[9] as number) || 0,
+    fall_tardies: (row[10] as number) || 0,
+    spring_tardies: (row[11] as number) || 0,
+    max_class_tardies: (row[12] as number) || 0,
+    max_class_tardies_fall: (row[13] as number) || 0,
+    max_class_tardies_spring: (row[14] as number) || 0,
   }))
 }
 
@@ -298,7 +386,7 @@ export function getStudentCourseAbsences(firstName: string, lastName: string): S
   const cutoff = getFallCutoff()
   if (!cutoff) return []
 
-  const excludeClause = getExcludedReasonsClause()
+  const excludeClause = buildFilterClause('ABSENCE')
 
   const stmt = db.prepare(`
     SELECT
@@ -334,7 +422,7 @@ export function getStudentReasonAbsences(firstName: string, lastName: string): S
   const cutoff = getFallCutoff()
   if (!cutoff) return []
 
-  const excludeClause = getExcludedReasonsClause()
+  const excludeClause = buildFilterClause('ABSENCE')
 
   const stmt = db.prepare(`
     SELECT
@@ -364,10 +452,14 @@ export function getStudentReasonAbsences(firstName: string, lastName: string): S
   return rows
 }
 
-export function getStudentRecords(firstName: string, lastName: string): AbsenceRecord[] {
+export function getStudentRecords(
+  firstName: string,
+  lastName: string,
+  type: CategoryType = 'ABSENCE',
+): AbsenceRecord[] {
   if (!db) throw new Error('Database not initialized')
 
-  const excludeClause = getExcludedReasonsClause()
+  const excludeClause = buildFilterClause(type)
 
   const stmt = db.prepare(`
     SELECT attendance_date, reason, course, excused_unexcused, absence_value
@@ -396,7 +488,7 @@ export function getStudentRecords(firstName: string, lastName: string): AbsenceR
 export function getStudentCourseRecords(firstName: string, lastName: string, course: string): AbsenceRecord[] {
   if (!db) throw new Error('Database not initialized')
 
-  const excludeClause = getExcludedReasonsClause()
+  const excludeClause = buildFilterClause('ABSENCE')
 
   const stmt = db.prepare(`
     SELECT attendance_date, reason, course, excused_unexcused, absence_value
@@ -425,7 +517,7 @@ export function getStudentCourseRecords(firstName: string, lastName: string, cou
 export function getStudentReasonRecords(firstName: string, lastName: string, reason: string): AbsenceRecord[] {
   if (!db) throw new Error('Database not initialized')
 
-  const excludeClause = getExcludedReasonsClause()
+  const excludeClause = buildFilterClause('ABSENCE')
 
   const stmt = db.prepare(`
     SELECT attendance_date, reason, course, excused_unexcused, absence_value
@@ -451,31 +543,76 @@ export function getStudentReasonRecords(firstName: string, lastName: string, rea
   return rows
 }
 
-export function getAllReasons(): string[] {
+/**
+ * Every category the imported data has produced, each with its bucket type and
+ * the reasons seen under it. Drives the grouped Settings tree.
+ */
+export function getCategoryTree(): CategoryInfo[] {
   if (!db) throw new Error('Database not initialized')
 
-  const results = db.exec(`SELECT DISTINCT reason FROM attendance ORDER BY reason`)
+  seedCategories()
+
+  const results = db.exec(`
+    SELECT c.category, c.type, a.reason
+    FROM categories c
+    LEFT JOIN (SELECT DISTINCT attendance_category, reason FROM attendance) a
+      ON a.attendance_category = c.category
+    ORDER BY c.category, a.reason
+  `)
   if (results.length === 0) return []
 
-  return results[0].values.map((row: unknown[]) => row[0] as string)
+  const byCategory = new Map<string, CategoryInfo>()
+  for (const row of results[0].values as unknown[][]) {
+    const category = row[0] as string
+    let entry = byCategory.get(category)
+    if (!entry) {
+      entry = { category, type: (row[1] as CategoryType) ?? 'ABSENCE', reasons: [] }
+      byCategory.set(category, entry)
+    }
+    if (row[2] !== null) entry.reasons.push(row[2] as string)
+  }
+
+  return [...byCategory.values()]
 }
 
-export function getExcludedReasons(): string[] {
+export function getExcludedReasons(): ExcludedReason[] {
   if (!db) throw new Error('Database not initialized')
 
-  const results = db.exec(`SELECT reason FROM excluded_reasons ORDER BY reason`)
+  const results = db.exec(`
+    SELECT attendance_category, reason FROM excluded_reasons
+    ORDER BY attendance_category, reason
+  `)
   if (results.length === 0) return []
 
-  return results[0].values.map((row: unknown[]) => row[0] as string)
+  return results[0].values.map((row: unknown[]) => ({
+    attendance_category: row[0] as string,
+    reason: row[1] as string,
+  }))
 }
 
-export function setExcludedReasons(reasons: string[]): void {
+export function setExcludedReasons(reasons: ExcludedReason[]): void {
   if (!db) throw new Error('Database not initialized')
 
   db.run(`DELETE FROM excluded_reasons`)
-  const stmt = db.prepare(`INSERT INTO excluded_reasons (reason) VALUES (?)`)
-  for (const reason of reasons) {
-    stmt.run([reason])
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO excluded_reasons (attendance_category, reason) VALUES (?, ?)`
+  )
+  for (const { attendance_category, reason } of reasons) {
+    stmt.run([attendance_category, reason])
+  }
+  stmt.free()
+  saveDatabase()
+}
+
+export function setCategoryTypes(types: CategoryTypeAssignment[]): void {
+  if (!db) throw new Error('Database not initialized')
+
+  const stmt = db.prepare(
+    `INSERT INTO categories (category, type) VALUES (?, ?)
+     ON CONFLICT(category) DO UPDATE SET type = excluded.type`
+  )
+  for (const { category, type } of types) {
+    stmt.run([category, type])
   }
   stmt.free()
   saveDatabase()

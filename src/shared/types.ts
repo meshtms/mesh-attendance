@@ -4,6 +4,31 @@ export interface ImportResult {
   skipped: number
 }
 
+// How a CSV "Attendance category" is bucketed. Categories are typed rather than
+// individually excluded so upstream renames (the school added "Tardy" mid-2026)
+// only require re-typing the category, not rewriting the reason exclusions.
+// Add new buckets here; the DB stores the type as free text.
+export const CATEGORY_TYPES = ['ABSENCE', 'TARDY'] as const
+export type CategoryType = (typeof CATEGORY_TYPES)[number]
+
+export interface CategoryInfo {
+  category: string
+  type: CategoryType
+  reasons: string[]
+}
+
+// Reasons repeat across categories (e.g. "Illness" is both an excused absence
+// and a tardy), so an exclusion is only meaningful scoped to its category.
+export interface ExcludedReason {
+  attendance_category: string
+  reason: string
+}
+
+export interface CategoryTypeAssignment {
+  category: string
+  type: CategoryType
+}
+
 export interface StudentAbsence {
   student_first_name: string
   student_last_name: string
@@ -14,6 +39,12 @@ export interface StudentAbsence {
   max_class_absences: number
   max_class_fall: number
   max_class_spring: number
+  total_tardies: number
+  fall_tardies: number
+  spring_tardies: number
+  max_class_tardies: number
+  max_class_tardies_fall: number
+  max_class_tardies_spring: number
 }
 
 export interface StudentCourseAbsence {
@@ -47,12 +78,13 @@ declare global {
       getStudentAbsences: () => Promise<StudentAbsence[]>
       getStudentCourseAbsences: (firstName: string, lastName: string) => Promise<StudentCourseAbsence[]>
       getStudentReasonAbsences: (firstName: string, lastName: string) => Promise<StudentReasonAbsence[]>
-      getStudentRecords: (firstName: string, lastName: string) => Promise<AbsenceRecord[]>
+      getStudentRecords: (firstName: string, lastName: string, type?: CategoryType) => Promise<AbsenceRecord[]>
       getStudentCourseRecords: (firstName: string, lastName: string, course: string) => Promise<AbsenceRecord[]>
       getStudentReasonRecords: (firstName: string, lastName: string, reason: string) => Promise<AbsenceRecord[]>
-      getAllReasons: () => Promise<string[]>
-      getExcludedReasons: () => Promise<string[]>
-      setExcludedReasons: (reasons: string[]) => Promise<void>
+      getCategoryTree: () => Promise<CategoryInfo[]>
+      getExcludedReasons: () => Promise<ExcludedReason[]>
+      setExcludedReasons: (reasons: ExcludedReason[]) => Promise<void>
+      setCategoryTypes: (types: CategoryTypeAssignment[]) => Promise<void>
       onUpdateStatus: (callback: (status: UpdateStatus) => void) => void
       installUpdate: () => Promise<void>
       getVersion: () => Promise<string>
