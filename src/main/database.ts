@@ -274,6 +274,25 @@ function seedCategories(): void {
   `)
 }
 
+/**
+ * Runs a write inside a transaction. Without this, a statement that throws
+ * part way through leaves the in-memory database half-written and never saved:
+ * a failed Save in Settings would appear to erase every excluded reason until
+ * the app was restarted.
+ */
+function transact(run: () => void): void {
+  if (!db) throw new Error('Database not initialized')
+  db.run('BEGIN')
+  try {
+    run()
+    db.run('COMMIT')
+  } catch (err) {
+    db.run('ROLLBACK')
+    throw err
+  }
+  saveDatabase()
+}
+
 function sqlQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
@@ -593,29 +612,54 @@ export function getExcludedReasons(): ExcludedReason[] {
 export function setExcludedReasons(reasons: ExcludedReason[]): void {
   if (!db) throw new Error('Database not initialized')
 
-  db.run(`DELETE FROM excluded_reasons`)
-  const stmt = db.prepare(
-    `INSERT OR IGNORE INTO excluded_reasons (attendance_category, reason) VALUES (?, ?)`
-  )
-  for (const { attendance_category, reason } of reasons) {
-    stmt.run([attendance_category, reason])
-  }
-  stmt.free()
-  saveDatabase()
+  transact(() => {
+    db!.run(`DELETE FROM excluded_reasons`)
+    const stmt = db!.prepare(
+      `INSERT OR IGNORE INTO excluded_reasons (attendance_category, reason) VALUES (?, ?)`
+    )
+    try {
+      for (const { attendance_category, reason } of reasons) {
+        // Name the offending row: a bare constraint message gives the user
+        // nothing to act on.
+        if (typeof attendance_category !== 'string' || typeof reason !== 'string') {
+          throw new Error(
+            `Bad excluded reason: ${JSON.stringify({ attendance_category, reason })}`,
+          )
+        }
+        try {
+          stmt.run([attendance_category, reason])
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          throw new Error(`Could not exclude "${reason}" in "${attendance_category}": ${message}`)
+        }
+      }
+    } finally {
+      stmt.free()
+    }
+  })
 }
 
 export function setCategoryTypes(types: CategoryTypeAssignment[]): void {
   if (!db) throw new Error('Database not initialized')
 
-  const stmt = db.prepare(
-    `INSERT INTO categories (category, type) VALUES (?, ?)
-     ON CONFLICT(category) DO UPDATE SET type = excluded.type`
-  )
-  for (const { category, type } of types) {
-    stmt.run([category, type])
-  }
-  stmt.free()
-  saveDatabase()
+  transact(() => {
+    const stmt = db!.prepare(
+      `INSERT INTO categories (category, type) VALUES (?, ?)
+       ON CONFLICT(category) DO UPDATE SET type = excluded.type`
+    )
+    try {
+      for (const { category, type } of types) {
+        try {
+          stmt.run([category, type])
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          throw new Error(`Could not set "${category}" to ${type}: ${message}`)
+        }
+      }
+    } finally {
+      stmt.free()
+    }
+  })
 }
 
 export function getStudentNotifications(firstName: string, lastName: string): Notification[] {

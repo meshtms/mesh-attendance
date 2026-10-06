@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Box, Button, Typography, Checkbox, FormControlLabel, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, ToggleButton, ToggleButtonGroup } from '@mui/material'
+import { Box, Button, Typography, Checkbox, FormControlLabel, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, ToggleButton, ToggleButtonGroup, Alert } from '@mui/material'
 import { CATEGORY_TYPES } from '../../shared/types'
 import type { CategoryInfo, CategoryType } from '../../shared/types'
 
@@ -18,6 +18,8 @@ function Settings({ onBack, onSave }: Props) {
   const [loading, setLoading] = useState(true)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -105,10 +107,17 @@ function Settings({ onBack, onSave }: Props) {
         </Button>
         <Typography variant="h6">Settings</Typography>
         <Box sx={{ flex: 1 }} />
-        <Button variant="contained" onClick={handleSave} size="small">
-          Save
+        <Button variant="contained" onClick={handleSave} size="small" disabled={saving}>
+          {saving ? 'Saving...' : 'Save'}
         </Button>
       </Box>
+
+      {saveError && (
+        <Alert severity="error" onClose={() => setSaveError(null)} sx={{ mx: 3, mb: 1 }}>
+          Could not save settings. Your selections are still here, and nothing was
+          changed. {saveError}
+        </Alert>
+      )}
 
       <Box sx={{ flex: 1, px: 3, py: 2, overflowY: 'auto' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
