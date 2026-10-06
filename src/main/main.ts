@@ -30,6 +30,20 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
 
+  // Preview builds are handed to other people on machines we cannot inspect,
+  // so leave a way to read an error: F12 opens DevTools, and renderer console
+  // messages are mirrored to the terminal/log.
+  if (IS_PREVIEW) {
+    mainWindow.webContents.on('before-input-event', (_event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') {
+        mainWindow?.webContents.toggleDevTools()
+      }
+    })
+    mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`)
+    })
+  }
+
   mainWindow.webContents.on('did-finish-load', () => {
     mainWindow?.setTitle(`${app.getName()} v${app.getVersion()}`)
   })
