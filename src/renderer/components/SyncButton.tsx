@@ -22,9 +22,11 @@ interface Props {
   syncing: boolean
   onSync: () => void
   onRefresh: () => void
+  /** The open dataset, named in the Refresh confirmation. */
+  datasetName: string
 }
 
-function SyncButton({ syncing, onSync, onRefresh }: Props) {
+function SyncButton({ syncing, onSync, onRefresh, datasetName }: Props) {
   const [open, setOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -103,11 +105,11 @@ function SyncButton({ syncing, onSync, onRefresh }: Props) {
       </Popper>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>Refresh attendance data?</DialogTitle>
+        <DialogTitle>Refresh “{datasetName}”?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This will delete every existing attendance record and reload from
-            the CSV you select next. Use this when data has gotten out of sync
+            This will delete every attendance record in <strong>{datasetName}</strong> and
+            reload it from the CSV you select next. Other datasets are not affected. Use this when data has gotten out of sync
             or duplicates have appeared. Notifications will not be affected.
           </DialogContentText>
         </DialogContent>

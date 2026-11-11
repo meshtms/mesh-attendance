@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { errorMessage } from '../errorMessage'
 
 export function useSync(onSynced: () => void) {
   const [syncing, setSyncing] = useState(false)
@@ -21,8 +22,8 @@ export function useSync(onSynced: () => void) {
           )
           onSynced()
         }
-      } catch {
-        setSyncMessage(mode === 'refresh' ? 'Refresh failed' : 'Sync failed')
+      } catch (err) {
+        setSyncMessage(`${mode === 'refresh' ? 'Refresh' : 'Sync'} failed: ${errorMessage(err)}`)
       } finally {
         setSyncing(false)
       }

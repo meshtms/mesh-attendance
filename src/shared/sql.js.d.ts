@@ -5,6 +5,7 @@ declare module 'sql.js' {
     prepare(sql: string): Statement
     export(): Uint8Array
     getRowsModified(): number
+    close(): void
   }
 
   interface Statement {
@@ -19,6 +20,10 @@ declare module 'sql.js' {
     Database: new (data?: ArrayLike<number>) => Database
   }
 
-  export default function initSqlJs(): Promise<SqlJsStatic>
-  export { Database, Statement }
+  interface SqlJsConfig {
+    locateFile?: (file: string) => string
+  }
+
+  export default function initSqlJs(config?: SqlJsConfig): Promise<SqlJsStatic>
+  export { Database, Statement, SqlJsStatic, SqlJsConfig }
 }

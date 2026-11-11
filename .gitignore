@@ -2,3 +2,5 @@ node_modules/
 dist/
 dist-electron/
 *.db
+dist-demo/
+dist-web/

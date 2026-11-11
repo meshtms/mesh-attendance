@@ -1,15 +1,17 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { AppBar, Toolbar, Typography, Button, Box, TextField, IconButton } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
-import type { UpdateStatus } from '../shared/types'
-import { DataGrid, GridColDef, GridRowParams } from '@mui/x-data-grid'
+import type { DatasetList, UpdateStatus } from '../shared/types'
+import { DataGrid, GridColDef, GridRowParams, GridColumnGroupingModel } from '@mui/x-data-grid'
 import type { StudentAbsence } from '../shared/types'
 import { useStudentAbsences } from './hooks/useStudentAbsences'
 import { useSync } from './hooks/useSync'
 import DrillDetail from './components/DrillDetail'
 import Settings from './components/Settings'
 import SyncButton from './components/SyncButton'
+import DatasetSwitcher from './components/DatasetSwitcher'
 import { COLOR_WARN, COLOR_ORANGE, COLOR_DANGER } from './components/chartColors'
+import { GROUP_ABSENCE, GROUP_TARDY, gridSx, thresholdColor } from './components/gridStyles'
 
 function formatNum(value: number): string {
   return value % 1 === 0.5 ? value.toFixed(1) : Math.round(value).toString()
@@ -59,7 +61,13 @@ function getCurrentTerm(): TermFilter {
   return month >= 8 ? 'Fall' : 'Spring'
 }
 
-function App() {
+interface Props {
+  datasets: DatasetList
+  onDatasetsChange: (datasets: DatasetList) => void
+}
+
+function App({ datasets, onDatasetsChange }: Props) {
+  const datasetName = datasets.datasets.find((d) => d.id === datasets.currentId)?.name ?? ''
   const { students, reload: reloadStudents } = useStudentAbsences()
   const [filter, setFilter] = useState('')
   const [selectedStudent, setSelectedStudent] = useState<StudentAbsence | null>(null)
@@ -73,55 +81,126 @@ function App() {
     return s.max_class_absences
   }, [termFilter])
 
-  // Columns need to be memoized with termFilter dependency for max_class
-  const columns: GridColDef[] = useMemo(() => [
-    {
-      field: 'name',
-      headerName: 'Student',
-      flex: 1,
-      minWidth: 200,
-      valueGetter: (_value: unknown, row: StudentAbsence) =>
-        `${row.student_first_name} ${row.student_last_name}`,
-      sortComparator: (a: string, b: string) => {
-        const lastA = a.split(' ').slice(-1)[0]
-        const lastB = b.split(' ').slice(-1)[0]
-        return lastA.localeCompare(lastB) || a.localeCompare(b)
+  // The term selector drives which column in each band is the "live" one: it is
+  // the value the threshold filter and the colour coding read from.
+  const activeSuffix = termFilter === 'Fall' ? 'fall' : termFilter === 'Spring' ? 'spring' : 'total'
+
+  const columns: GridColDef[] = useMemo(() => {
+    const numeric = (
+      field: string,
+      headerName: string,
+      group: typeof GROUP_ABSENCE,
+      isActive: boolean,
+      colorByThreshold: boolean,
+    ): GridColDef => ({
+      field,
+      headerName,
+      width: 88,
+      type: 'number',
+      align: 'center',
+      headerAlign: 'center',
+      cellClassName: `band-${group.id}${isActive ? ' band-active' : ''}`,
+      headerClassName: `band-${group.id}${isActive ? ' band-active' : ''}`,
+      renderCell: (params) => {
+        const value = params.value as number | null
+        if (value == null || value === 0) {
+          return <Box component="span" sx={{ color: 'text.disabled' }}>&ndash;</Box>
+        }
+        if (!isActive) {
+          return <Box component="span" sx={{ color: 'text.secondary' }}>{formatNum(value)}</Box>
+        }
+        const color = colorByThreshold ? thresholdColor(value) : group.accent
+        const plain = colorByThreshold && value < 5
+        return (
+          <Box
+            component="span"
+            sx={{
+              minWidth: 34,
+              px: 1,
+              py: 0.25,
+              borderRadius: '999px',
+              fontWeight: 600,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: plain ? 'text.primary' : '#fff',
+              backgroundColor: plain ? 'transparent' : color,
+            }}
+          >
+            {formatNum(value)}
+          </Box>
+        )
       },
-    },
-    {
-      field: 'max_class_display',
-      headerName: 'Class Max',
-      width: 100,
-      type: 'number',
-      valueGetter: (_value: unknown, row: StudentAbsence) => {
-        if (termFilter === 'Fall') return row.max_class_fall
-        if (termFilter === 'Spring') return row.max_class_spring
-        return row.max_class_absences
+    })
+
+    return [
+      {
+        field: 'name',
+        headerName: 'Student',
+        flex: 1,
+        minWidth: 200,
+        valueGetter: (_value: unknown, row: StudentAbsence) =>
+          `${row.student_first_name} ${row.student_last_name}`,
+        renderCell: (params) => (
+          <Box sx={{ fontWeight: 500 }}>{params.value as string}</Box>
+        ),
+        sortComparator: (a: string, b: string) => {
+          const lastA = a.split(' ').slice(-1)[0]
+          const lastB = b.split(' ').slice(-1)[0]
+          return lastA.localeCompare(lastB) || a.localeCompare(b)
+        },
       },
-      valueFormatter: (value: number | null) => value != null ? formatNum(value) : '',
+      numeric('fall_absences', 'Fall', GROUP_ABSENCE, activeSuffix === 'fall', true),
+      numeric('spring_absences', 'Spring', GROUP_ABSENCE, activeSuffix === 'spring', true),
+      numeric('total_absences', 'Year', GROUP_ABSENCE, activeSuffix === 'total', true),
+      {
+        ...numeric('max_class_display', 'Class Max', GROUP_ABSENCE, false, false),
+        description: 'Most absences in any single course for the selected term',
+        valueGetter: (_value: unknown, row: StudentAbsence) => {
+          if (termFilter === 'Fall') return row.max_class_fall
+          if (termFilter === 'Spring') return row.max_class_spring
+          return row.max_class_absences
+        },
+      },
+      numeric('fall_tardies', 'Fall', GROUP_TARDY, activeSuffix === 'fall', false),
+      numeric('spring_tardies', 'Spring', GROUP_TARDY, activeSuffix === 'spring', false),
+      numeric('total_tardies', 'Year', GROUP_TARDY, activeSuffix === 'total', false),
+      {
+        ...numeric('max_class_tardies_display', 'Class Max', GROUP_TARDY, false, false),
+        description: 'Most tardies in any single course for the selected term',
+        valueGetter: (_value: unknown, row: StudentAbsence) => {
+          if (termFilter === 'Fall') return row.max_class_tardies_fall
+          if (termFilter === 'Spring') return row.max_class_tardies_spring
+          return row.max_class_tardies
+        },
+      },
+    ]
+  }, [termFilter, activeSuffix])
+
+  const columnGroupingModel: GridColumnGroupingModel = useMemo(() => [
+    {
+      groupId: GROUP_ABSENCE.id,
+      headerName: 'Absences',
+      headerClassName: `band-${GROUP_ABSENCE.id} band-head`,
+      children: [
+        { field: 'fall_absences' },
+        { field: 'spring_absences' },
+        { field: 'total_absences' },
+        { field: 'max_class_display' },
+      ],
     },
     {
-      field: 'fall_absences',
-      headerName: 'Fall',
-      width: 80,
-      type: 'number',
-      valueFormatter: (value: number | null) => value != null ? formatNum(value) : '',
+      groupId: GROUP_TARDY.id,
+      headerName: 'Tardies',
+      headerClassName: `band-${GROUP_TARDY.id} band-head`,
+      children: [
+        { field: 'fall_tardies' },
+        { field: 'spring_tardies' },
+        { field: 'total_tardies' },
+        { field: 'max_class_tardies_display' },
+      ],
     },
-    {
-      field: 'spring_absences',
-      headerName: 'Spring',
-      width: 80,
-      type: 'number',
-      valueFormatter: (value: number | null) => value != null ? formatNum(value) : '',
-    },
-    {
-      field: 'total_absences',
-      headerName: 'Total',
-      width: 80,
-      type: 'number',
-      valueFormatter: (value: number | null) => value != null ? formatNum(value) : '',
-    },
-  ], [termFilter])
+  ], [])
+
   const [thresholdFilter, setThresholdFilter] = useState<number | null>(null)
 
   const { syncing, syncMessage, sync, refresh } = useSync(reloadStudents)
@@ -141,6 +220,12 @@ function App() {
     if (termFilter === 'Fall') return s.fall_absences
     if (termFilter === 'Spring') return s.spring_absences
     return s.total_absences
+  }, [termFilter])
+
+  const getTardyTermValue = useCallback((s: StudentAbsence) => {
+    if (termFilter === 'Fall') return s.fall_tardies
+    if (termFilter === 'Spring') return s.spring_tardies
+    return s.total_tardies
   }, [termFilter])
 
   // Compute threshold counts
@@ -174,6 +259,13 @@ function App() {
 
   const rows = filtered.map((s, i) => ({ id: i, ...s }))
 
+  // Totals for whatever the grid is currently showing, in the selected term.
+  const summary = useMemo(() => ({
+    students: filtered.length,
+    absences: filtered.reduce((sum, s) => sum + getTermValue(s), 0),
+    tardies: filtered.reduce((sum, s) => sum + getTardyTermValue(s), 0),
+  }), [filtered, getTermValue, getTardyTermValue])
+
   const handleThresholdClick = (threshold: number) => {
     setThresholdFilter(thresholdFilter === threshold ? null : threshold)
   }
@@ -187,9 +279,11 @@ function App() {
               Return to Grid
             </Button>
           )}
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Casady Attendance
+          <Typography variant="h6">
+            Casady Attendance for
           </Typography>
+          <DatasetSwitcher list={datasets} onChange={onDatasetsChange} />
+          <Box sx={{ flexGrow: 1 }} />
           {updateStatus?.status === 'available' && (
             <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
               Update v{updateStatus.version} found...
@@ -221,7 +315,7 @@ function App() {
               {syncMessage}
             </Typography>
           )}
-          <SyncButton syncing={syncing} onSync={sync} onRefresh={refresh} />
+          <SyncButton syncing={syncing} onSync={sync} onRefresh={refresh} datasetName={datasetName} />
           <IconButton onClick={() => setShowSettings(true)} sx={{ ml: 1 }} title="Settings">
             <SettingsIcon />
           </IconButton>
@@ -230,7 +324,7 @@ function App() {
 
       {showSettings ? (
         <Box sx={{ flex: 1, minHeight: 0 }}>
-          <Settings onBack={() => setShowSettings(false)} onSave={reloadStudents} />
+          <Settings onBack={() => setShowSettings(false)} onSave={reloadStudents} datasetName={datasetName} />
         </Box>
       ) : selectedStudent ? (
         <Box sx={{ flex: 1, minHeight: 0 }}>
@@ -283,16 +377,24 @@ function App() {
                 9.5+ ({thresholdCounts.nineFive})
               </Box>
             </Box>
+
+            <Box sx={{ flex: 1 }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {summary.students} students &middot; {formatNum(summary.absences)} absences
+              &middot; {formatNum(summary.tardies)} tardies
+            </Typography>
           </Box>
 
           <Box sx={{ flex: 1, p: 2, minHeight: 0 }}>
             <DataGrid
               rows={rows}
               columns={columns}
+              columnGroupingModel={columnGroupingModel}
               density="compact"
+              columnHeaderHeight={38}
               disableColumnMenu={false}
               onRowClick={handleRowClick}
-              sx={{ cursor: 'pointer' }}
+              sx={gridSx}
               initialState={{
                 sorting: { sortModel: [{ field: 'max_class_display', sort: 'desc' }] },
               }}
