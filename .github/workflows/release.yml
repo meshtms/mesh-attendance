@@ -142,7 +142,7 @@ jobs:
 
             // Find and upload assets
             const distDir = path.join(process.cwd(), 'dist');
-            const files = fs.readdirSync(distDir).filter(f => f.endsWith('.exe') || f === 'latest.yml');
+            const files = fs.readdirSync(distDir).filter(f => f.endsWith('.exe') || f.endsWith('.exe.blockmap') || f === 'latest.yml');
 
             for (const file of files) {
               const filePath = path.join(distDir, file);

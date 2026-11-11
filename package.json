@@ -38,7 +38,8 @@
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "Casady-Attendance-Setup-${version}.${ext}"
     },
     "mac": {
       "target": "dmg"
