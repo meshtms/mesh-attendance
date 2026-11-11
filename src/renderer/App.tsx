@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { AppBar, Toolbar, Typography, Button, Box, TextField, IconButton } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
-import type { UpdateStatus } from '../shared/types'
+import type { DatasetList, UpdateStatus } from '../shared/types'
 import { DataGrid, GridColDef, GridRowParams, GridColumnGroupingModel } from '@mui/x-data-grid'
 import type { StudentAbsence } from '../shared/types'
 import { useStudentAbsences } from './hooks/useStudentAbsences'
@@ -9,6 +9,7 @@ import { useSync } from './hooks/useSync'
 import DrillDetail from './components/DrillDetail'
 import Settings from './components/Settings'
 import SyncButton from './components/SyncButton'
+import DatasetSwitcher from './components/DatasetSwitcher'
 import { COLOR_WARN, COLOR_ORANGE, COLOR_DANGER } from './components/chartColors'
 import { GROUP_ABSENCE, GROUP_TARDY, gridSx, thresholdColor } from './components/gridStyles'
 
@@ -60,7 +61,13 @@ function getCurrentTerm(): TermFilter {
   return month >= 8 ? 'Fall' : 'Spring'
 }
 
-function App() {
+interface Props {
+  datasets: DatasetList
+  onDatasetsChange: (datasets: DatasetList) => void
+}
+
+function App({ datasets, onDatasetsChange }: Props) {
+  const datasetName = datasets.datasets.find((d) => d.id === datasets.currentId)?.name ?? ''
   const { students, reload: reloadStudents } = useStudentAbsences()
   const [filter, setFilter] = useState('')
   const [selectedStudent, setSelectedStudent] = useState<StudentAbsence | null>(null)
@@ -272,9 +279,11 @@ function App() {
               Return to Grid
             </Button>
           )}
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Casady Attendance
+          <Typography variant="h6">
+            Casady Attendance for
           </Typography>
+          <DatasetSwitcher list={datasets} onChange={onDatasetsChange} />
+          <Box sx={{ flexGrow: 1 }} />
           {updateStatus?.status === 'available' && (
             <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
               Update v{updateStatus.version} found...
@@ -306,7 +315,7 @@ function App() {
               {syncMessage}
             </Typography>
           )}
-          <SyncButton syncing={syncing} onSync={sync} onRefresh={refresh} />
+          <SyncButton syncing={syncing} onSync={sync} onRefresh={refresh} datasetName={datasetName} />
           <IconButton onClick={() => setShowSettings(true)} sx={{ ml: 1 }} title="Settings">
             <SettingsIcon />
           </IconButton>
@@ -315,7 +324,7 @@ function App() {
 
       {showSettings ? (
         <Box sx={{ flex: 1, minHeight: 0 }}>
-          <Settings onBack={() => setShowSettings(false)} onSave={reloadStudents} />
+          <Settings onBack={() => setShowSettings(false)} onSave={reloadStudents} datasetName={datasetName} />
         </Box>
       ) : selectedStudent ? (
         <Box sx={{ flex: 1, minHeight: 0 }}>

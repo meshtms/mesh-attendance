@@ -5,10 +5,17 @@
 import initSqlJs from 'sql.js'
 import wasmUrl from 'sql.js/dist/sql-wasm-browser.wasm?url'
 import * as attendanceDb from '../shared/attendanceDb'
+import * as datasets from '../shared/datasets'
+import type { DatasetList } from '../shared/types'
 
+// One object store holds the dataset registry and one entry per dataset.
+// 'attendance.db' is the single database from before datasets existed; it is
+// copied into the first dataset and left in place as a backup.
 const IDB_NAME = 'casady-attendance'
 const IDB_STORE = 'files'
-const IDB_KEY = 'attendance.db'
+const REGISTRY_KEY = 'registry'
+const LEGACY_KEY = 'attendance.db'
+const dbKey = (id: string) => `db:${id}`
 
 function openIdb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -19,32 +26,44 @@ function openIdb(): Promise<IDBDatabase> {
   })
 }
 
-async function idbGet(): Promise<Uint8Array | null> {
+async function idbGet<T>(key: string): Promise<T | undefined> {
   const idb = await openIdb()
   return new Promise((resolve, reject) => {
-    const req = idb.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(IDB_KEY)
-    req.onsuccess = () => resolve(req.result ? new Uint8Array(req.result as ArrayBuffer) : null)
+    const req = idb.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key)
+    req.onsuccess = () => resolve(req.result as T | undefined)
     req.onerror = () => reject(req.error)
   })
 }
 
-async function idbPut(bytes: Uint8Array): Promise<void> {
+async function idbWrite(key: string, value: unknown | undefined): Promise<void> {
   const idb = await openIdb()
   return new Promise((resolve, reject) => {
     const tx = idb.transaction(IDB_STORE, 'readwrite')
-    tx.objectStore(IDB_STORE).put(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), IDB_KEY)
+    const store = tx.objectStore(IDB_STORE)
+    if (value === undefined) store.delete(key)
+    else store.put(value, key)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
   })
 }
 
-// Saves are queued so an older snapshot can never land after a newer one.
-let saveChain: Promise<void> = Promise.resolve()
-function queueSave(bytes: Uint8Array): void {
-  saveChain = saveChain
-    .then(() => idbPut(bytes))
-    .catch((err) => console.error('Could not save attendance database', err))
+// Writes are queued, and reads wait for them, so an older snapshot can never
+// land after a newer one and a dataset reopened right after a switch sees its
+// latest save.
+let writeChain: Promise<void> = Promise.resolve()
+function queueWrite(key: string, value: unknown | undefined): Promise<void> {
+  writeChain = writeChain
+    .then(() => idbWrite(key, value))
+    .catch((err) => console.error(`Could not save ${key}`, err))
+  return writeChain
 }
+async function readBytes(key: string): Promise<Uint8Array | null> {
+  await writeChain
+  const value = await idbGet<ArrayBuffer>(key)
+  return value ? new Uint8Array(value) : null
+}
+const toBuffer = (bytes: Uint8Array) =>
+  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
 
 /** Resolves with the chosen file's text, or null if the user cancels. */
 function pickCsv(): Promise<string | null> {
@@ -66,10 +85,17 @@ export async function installWebApi(): Promise<void> {
   // the database is "best effort" and can be cleared silently.
   navigator.storage?.persist?.().catch(() => {})
 
-  await attendanceDb.initDatabase({
+  await datasets.initDatasets({
     sql: () => initSqlJs({ locateFile: () => wasmUrl }),
-    load: idbGet,
-    save: queueSave,
+    loadRegistry: async () => {
+      await writeChain
+      return (await idbGet<DatasetList>(REGISTRY_KEY)) ?? null
+    },
+    saveRegistry: (list) => void queueWrite(REGISTRY_KEY, list),
+    loadDb: (id) => readBytes(dbKey(id)),
+    saveDb: (id, bytes) => void queueWrite(dbKey(id), toBuffer(bytes)),
+    deleteDb: (id) => queueWrite(dbKey(id), undefined),
+    loadLegacyDb: () => readBytes(LEGACY_KEY),
   })
 
   const api: Window['electronAPI'] = {
@@ -81,6 +107,11 @@ export async function installWebApi(): Promise<void> {
       const csv = await pickCsv()
       return csv === null ? null : attendanceDb.importCSV(csv, true)
     },
+    listDatasets: async () => datasets.listDatasets(),
+    switchDataset: (id) => datasets.switchDataset(id),
+    createDataset: (name, copyFrom) => datasets.createDataset(name, copyFrom),
+    renameDataset: async (id, name) => datasets.renameDataset(id, name),
+    deleteDataset: (id) => datasets.deleteDataset(id),
     clearAttendance: async () => attendanceDb.clearAttendance(),
     resetSettings: async () => attendanceDb.resetSettings(),
     getStudentAbsences: async () => attendanceDb.getStudentAbsences(),

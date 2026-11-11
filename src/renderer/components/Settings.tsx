@@ -6,12 +6,14 @@ import type { CategoryInfo, CategoryType } from '../../shared/types'
 interface Props {
   onBack: () => void
   onSave: () => void
+  /** The open dataset; settings apply to it alone. */
+  datasetName: string
 }
 
 // Reasons repeat across categories, so exclusions are keyed by the pair.
 const key = (category: string, reason: string) => `${category}\x1F${reason}`
 
-function Settings({ onBack, onSave }: Props) {
+function Settings({ onBack, onSave, datasetName }: Props) {
   const [tree, setTree] = useState<CategoryInfo[]>([])
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [types, setTypes] = useState<Map<string, CategoryType>>(new Map())
@@ -137,7 +139,7 @@ function Settings({ onBack, onSave }: Props) {
         <Button variant="outlined" onClick={onBack} size="small">
           Cancel
         </Button>
-        <Typography variant="h6">Settings</Typography>
+        <Typography variant="h6">Settings · {datasetName}</Typography>
         <Box sx={{ flex: 1 }} />
         <Button variant="contained" onClick={handleSave} size="small" disabled={saving}>
           {saving ? 'Saving...' : 'Save'}

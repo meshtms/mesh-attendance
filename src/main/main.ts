@@ -1,9 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import initSqlJs from 'sql.js'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, clearAttendance, resetSettings, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from '../shared/attendanceDb'
+import { initDatasets, listDatasets, switchDataset, createDataset, renameDataset, deleteDataset } from '../shared/datasets'
+import { importCSV, clearAttendance, resetSettings, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from '../shared/attendanceDb'
 import type { CategoryType, CategoryTypeAssignment, ExcludedReason, NewNotification } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -51,15 +52,35 @@ function createWindow() {
   })
 }
 
-// The desktop build keeps its database as a file in the per-app userData folder.
-const dbPath = () => join(app.getPath('userData'), 'attendance.db')
+// The desktop build keeps each dataset as userData/datasets/<id>.db, listed in
+// userData/datasets/registry.json. userData/attendance.db is the database from
+// before datasets; it is copied into the first dataset and left as a backup.
+const userData = (...parts: string[]) => join(app.getPath('userData'), ...parts)
+const datasetDir = () => userData('datasets')
+const datasetPath = (id: string) => join(datasetDir(), `${id}.db`)
+const registryPath = () => join(datasetDir(), 'registry.json')
+const readIfExists = (path: string) => (existsSync(path) ? new Uint8Array(readFileSync(path)) : null)
 
 app.whenReady().then(async () => {
-  await initDatabase({
+  mkdirSync(datasetDir(), { recursive: true })
+  await initDatasets({
     sql: () => initSqlJs(),
-    load: async () => (existsSync(dbPath()) ? new Uint8Array(readFileSync(dbPath())) : null),
-    save: (bytes) => writeFileSync(dbPath(), Buffer.from(bytes)),
+    loadRegistry: async () =>
+      existsSync(registryPath()) ? JSON.parse(readFileSync(registryPath(), 'utf-8')) : null,
+    saveRegistry: (list) => writeFileSync(registryPath(), JSON.stringify(list, null, 2)),
+    loadDb: async (id) => readIfExists(datasetPath(id)),
+    saveDb: (id, bytes) => writeFileSync(datasetPath(id), Buffer.from(bytes)),
+    deleteDb: async (id) => rmSync(datasetPath(id), { force: true }),
+    loadLegacyDb: async () => readIfExists(userData('attendance.db')),
   })
+
+  ipcMain.handle('list-datasets', () => listDatasets())
+  ipcMain.handle('switch-dataset', (_event, id: string) => switchDataset(id))
+  ipcMain.handle('create-dataset', (_event, name: string, copySettingsFromId?: string) =>
+    createDataset(name, copySettingsFromId),
+  )
+  ipcMain.handle('rename-dataset', (_event, id: string, name: string) => renameDataset(id, name))
+  ipcMain.handle('delete-dataset', (_event, id: string) => deleteDataset(id))
 
   ipcMain.handle('import-csv', async () => {
     if (!mainWindow) return

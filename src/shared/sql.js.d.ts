@@ -5,6 +5,7 @@ declare module 'sql.js' {
     prepare(sql: string): Statement
     export(): Uint8Array
     getRowsModified(): number
+    close(): void
   }
 
   interface Statement {

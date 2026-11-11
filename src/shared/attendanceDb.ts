@@ -1,28 +1,30 @@
-// Attendance database shared by the desktop (Electron) and web builds. All
-// storage-specific work is behind DbHost: the desktop build keeps the database
-// in a file under userData, the web build keeps it in the browser's IndexedDB.
-// Nothing in here may import Node or browser-only modules.
+// Attendance database shared by the desktop (Electron) and web builds. One
+// dataset's database is open at a time (see datasets.ts, which decides which
+// one and where it is stored). Nothing in here may import Node or
+// browser-only modules.
 import type { Database, SqlJsStatic } from 'sql.js'
 import Papa from 'papaparse'
 import type { CategoryInfo, CategoryType, CategoryTypeAssignment, ExcludedReason, ImportResult, StudentAbsence, StudentCourseAbsence, StudentReasonAbsence, AbsenceRecord, Notification, NewNotification } from '../shared/types'
 
-export interface DbHost {
-  /** Loads sql.js (each build locates the .wasm differently). */
-  sql: () => Promise<SqlJsStatic>
-  /** The saved database, or null on first run. */
-  load: () => Promise<Uint8Array | null>
-  /** Persists the whole database after every write. */
-  save: (bytes: Uint8Array) => void
-}
-
+let SQL: SqlJsStatic | null = null
 let db: Database | null = null
-let host: DbHost | null = null
+let persist: ((bytes: Uint8Array) => void) | null = null
 
-export async function initDatabase(dbHost: DbHost): Promise<void> {
-  host = dbHost
-  const SQL = await host.sql()
-  const saved = await host.load()
-  db = saved ? new SQL.Database(saved) : new SQL.Database()
+/**
+ * Makes `bytes` (or a new, empty database) the open database, migrating it to
+ * the current schema. Every later write is handed to `save`.
+ */
+export async function openDatabase(
+  sql: SqlJsStatic,
+  bytes: Uint8Array | null,
+  save: (bytes: Uint8Array) => void,
+): Promise<void> {
+  SQL = sql
+  db?.close()
+  db = null
+  persist = null
+  db = bytes ? new sql.Database(bytes) : new sql.Database()
+  persist = save
 
   // Migrate: add absence_value column if missing (existing databases)
   const cols = db.exec("PRAGMA table_info(attendance)")
@@ -220,8 +222,44 @@ export function parseAttendanceDate(raw: string): string | null {
 }
 
 function saveDatabase(): void {
-  if (!db || !host) return
-  host.save(db.export())
+  if (!db || !persist) return
+  persist(db.export())
+}
+
+/** The open database as bytes. */
+export function exportDatabase(): Uint8Array {
+  if (!db) throw new Error('Database not initialized')
+  return db.export()
+}
+
+/**
+ * Copies category types and excluded reasons from another dataset's database
+ * into the open one. Attendance and notifications are not copied.
+ */
+export function copySettingsFrom(source: Uint8Array): void {
+  if (!db || !SQL) throw new Error('Database not initialized')
+  const src = new SQL.Database(source)
+  try {
+    const rows = (sql: string) => {
+      const r = src.exec(sql)
+      return r.length > 0 ? (r[0].values as string[][]) : []
+    }
+    const categories = rows('SELECT category, type FROM categories')
+    const excluded = rows('SELECT attendance_category, reason FROM excluded_reasons')
+    transact(() => {
+      const cat = db!.prepare('INSERT OR REPLACE INTO categories (category, type) VALUES (?, ?)')
+      const ex = db!.prepare('INSERT OR IGNORE INTO excluded_reasons (attendance_category, reason) VALUES (?, ?)')
+      try {
+        for (const row of categories) cat.run(row)
+        for (const row of excluded) ex.run(row)
+      } finally {
+        cat.free()
+        ex.free()
+      }
+    })
+  } finally {
+    src.close()
+  }
 }
 
 // SHA-256 via Web Crypto, which both Node (Electron main) and browsers provide.
@@ -261,6 +299,9 @@ const STUDENT_ID_COLUMN = 'Student id'
  */
 export async function importCSV(csvString: string, replace = false): Promise<ImportResult> {
   if (!db) throw new Error('Database not initialized')
+  // Hashing below is async; if the user switches dataset meanwhile, the rows
+  // must not land in the newly opened one.
+  const target = db
 
   const parsed = Papa.parse<Record<string, string>>(csvString, {
     header: true,
@@ -303,6 +344,8 @@ export async function importCSV(csvString: string, replace = false): Promise<Imp
       ),
     ),
   )
+
+  if (db !== target) throw new Error('The dataset changed during import. Nothing was imported.')
 
   transact(() => {
     if (replace) db!.run('DELETE FROM attendance')

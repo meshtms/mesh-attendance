@@ -74,6 +74,11 @@ declare global {
     electronAPI: {
       importCSV: () => Promise<ImportResult | null>
       refreshCSV: () => Promise<ImportResult | null>
+      listDatasets: () => Promise<DatasetList>
+      switchDataset: (id: string) => Promise<DatasetList>
+      createDataset: (name: string, copySettingsFromId?: string) => Promise<DatasetList>
+      renameDataset: (id: string, name: string) => Promise<DatasetList>
+      deleteDataset: (id: string) => Promise<DatasetList>
       clearAttendance: () => Promise<void>
       resetSettings: () => Promise<void>
       getStudentAbsences: () => Promise<StudentAbsence[]>
@@ -94,6 +99,17 @@ declare global {
       deleteNotification: (id: number) => Promise<void>
     }
   }
+}
+
+/** One independent silo of attendance data and its settings. */
+export interface DatasetInfo {
+  id: string
+  name: string
+}
+
+export interface DatasetList {
+  datasets: DatasetInfo[]
+  currentId: string
 }
 
 export interface UpdateStatus {

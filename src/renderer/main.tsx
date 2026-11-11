@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import theme from './theme'
-import App from './App'
+import Root from './Root'
 
 async function boot() {
   // The web build has no Electron preload, so it supplies window.electronAPI
@@ -17,7 +17,7 @@ async function boot() {
     <React.StrictMode>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <App />
+        <Root />
       </ThemeProvider>
     </React.StrictMode>
   )

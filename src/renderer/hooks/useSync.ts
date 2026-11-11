@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { errorMessage } from '../errorMessage'
 
 export function useSync(onSynced: () => void) {
   const [syncing, setSyncing] = useState(false)
@@ -22,13 +23,7 @@ export function useSync(onSynced: () => void) {
           onSynced()
         }
       } catch (err) {
-        // Electron wraps main-process errors as "Error invoking remote method
-        // 'x': Error: <message>"; keep only the message.
-        const message = (err instanceof Error ? err.message : String(err)).replace(
-          /^Error invoking remote method '[^']+': (Error: )?/,
-          '',
-        )
-        setSyncMessage(`${mode === 'refresh' ? 'Refresh' : 'Sync'} failed: ${message}`)
+        setSyncMessage(`${mode === 'refresh' ? 'Refresh' : 'Sync'} failed: ${errorMessage(err)}`)
       } finally {
         setSyncing(false)
       }

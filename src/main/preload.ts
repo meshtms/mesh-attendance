@@ -3,6 +3,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   importCSV: () => ipcRenderer.invoke('import-csv'),
   refreshCSV: () => ipcRenderer.invoke('refresh-csv'),
+  listDatasets: () => ipcRenderer.invoke('list-datasets'),
+  switchDataset: (id: string) => ipcRenderer.invoke('switch-dataset', id),
+  createDataset: (name: string, copySettingsFromId?: string) =>
+    ipcRenderer.invoke('create-dataset', name, copySettingsFromId),
+  renameDataset: (id: string, name: string) => ipcRenderer.invoke('rename-dataset', id, name),
+  deleteDataset: (id: string) => ipcRenderer.invoke('delete-dataset', id),
   clearAttendance: () => ipcRenderer.invoke('clear-attendance'),
   resetSettings: () => ipcRenderer.invoke('reset-settings'),
   getStudentAbsences: () => ipcRenderer.invoke('get-student-absences'),
