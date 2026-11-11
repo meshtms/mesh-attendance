@@ -13,6 +13,23 @@ let mainWindow: BrowserWindow | null = null
 // sit alongside a real install. They must never talk to the release feed.
 const IS_PREVIEW = app.getName().toLowerCase().includes('preview')
 
+// One running copy per install. Each copy holds the whole database in memory
+// and writes all of it on every save, so a second copy would silently
+// overwrite the first one's changes. Launching again just brings the existing
+// window forward. (The lock is per app, so the preview and the real app can
+// still run side by side.)
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null)
 
@@ -62,6 +79,7 @@ const registryPath = () => join(datasetDir(), 'registry.json')
 const readIfExists = (path: string) => (existsSync(path) ? new Uint8Array(readFileSync(path)) : null)
 
 app.whenReady().then(async () => {
+  if (!isPrimaryInstance) return
   mkdirSync(datasetDir(), { recursive: true })
   await initDatasets({
     sql: () => initSqlJs(),
