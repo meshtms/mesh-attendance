@@ -1,15 +1,26 @@
-# Standalone installer for showing work-in-progress branches (e.g. tardy).
-# Its own appId + productName means it installs alongside the real app, keeps a
+# Standalone portable .exe for showing work-in-progress branches (e.g. tardy):
+# one file the user double-clicks, no install step.
+# Its own appId + productName means it runs alongside the real app, keeps a
 # separate database, and never publishes to the release feed.
 appId: com.casady.attendance.preview
 productName: Casady Attendance Preview
+# electron-builder does not write productName into the packaged package.json,
+# so without this app.getName() returns "mesh-attendance" for both builds: the
+# preview would share the real app's userData folder (and database) and
+# IS_PREVIEW in main.ts would be false.
+extraMetadata:
+  name: mesh-attendance-preview
+  productName: Casady Attendance Preview
 directories:
   output: dist-demo
 win:
-  target: nsis
-nsis:
-  oneClick: true
-  perMachine: false
+  target: portable
+  # Skips electron-builder's winCodeSign download, which fails to extract on
+  # Windows without Developer Mode (it contains macOS symlinks). Preview builds
+  # are unsigned anyway.
+  signAndEditExecutable: false
+portable:
+  artifactName: Casady-Attendance-Preview-${version}.exe
 files:
   - dist/**/*
   - dist-electron/**/*
