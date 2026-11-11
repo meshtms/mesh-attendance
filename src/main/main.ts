@@ -195,7 +195,8 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Auto-update (production builds only, never preview builds)
+  // Auto-update (production builds only, never preview builds). Checks once at
+  // startup; a downloaded update installs on "Restart to Update" or on quit.
   if (!process.env.VITE_DEV_SERVER_URL && !IS_PREVIEW) {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
