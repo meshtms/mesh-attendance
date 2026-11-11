@@ -61,15 +61,26 @@ function Settings({ onBack, onSave }: Props) {
   }
 
   const handleSave = async () => {
-    await window.electronAPI.setCategoryTypes(
-      [...types].map(([category, type]) => ({ category, type })),
-    )
-    await window.electronAPI.setExcludedReasons(
-      [...excluded].map((k) => {
-        const [attendance_category, reason] = k.split('\x1F')
-        return { attendance_category, reason }
-      }),
-    )
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await window.electronAPI.setCategoryTypes(
+        [...types].map(([category, type]) => ({ category, type })),
+      )
+      await window.electronAPI.setExcludedReasons(
+        [...excluded].map((k) => {
+          const [attendance_category, reason] = k.split('\x1F')
+          return { attendance_category, reason }
+        }),
+      )
+    } catch (err) {
+      // Stay on the page with the user's selections intact; the writes are
+      // transactional, so nothing was half-saved.
+      setSaveError(err instanceof Error ? err.message : String(err))
+      return
+    } finally {
+      setSaving(false)
+    }
     onSave()
     onBack()
   }
