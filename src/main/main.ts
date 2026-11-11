@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
 import { join } from 'path'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
+import initSqlJs from 'sql.js'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, clearAttendance, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from './database'
+import { initDatabase, importCSV, clearAttendance, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from '../shared/attendanceDb'
 import type { CategoryType, CategoryTypeAssignment, ExcludedReason, NewNotification } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -49,8 +51,15 @@ function createWindow() {
   })
 }
 
+// The desktop build keeps its database as a file in the per-app userData folder.
+const dbPath = () => join(app.getPath('userData'), 'attendance.db')
+
 app.whenReady().then(async () => {
-  await initDatabase()
+  await initDatabase({
+    sql: () => initSqlJs(),
+    load: async () => (existsSync(dbPath()) ? new Uint8Array(readFileSync(dbPath())) : null),
+    save: (bytes) => writeFileSync(dbPath(), Buffer.from(bytes)),
+  })
 
   ipcMain.handle('import-csv', async () => {
     if (!mainWindow) return
@@ -65,7 +74,7 @@ app.whenReady().then(async () => {
       return null
     }
 
-    return importCSV(result.filePaths[0])
+    return importCSV(readFileSync(result.filePaths[0], 'utf-8'))
   })
 
   ipcMain.handle('clear-attendance', () => {
@@ -85,8 +94,10 @@ app.whenReady().then(async () => {
       return null
     }
 
+    // Read before clearing so an unreadable file leaves the data in place.
+    const csv = readFileSync(result.filePaths[0], 'utf-8')
     clearAttendance()
-    return importCSV(result.filePaths[0])
+    return importCSV(csv)
   })
 
   ipcMain.handle('get-student-absences', () => {

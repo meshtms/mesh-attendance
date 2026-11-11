@@ -5,7 +5,9 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --mode web",
     "build": "tsc && vite build && electron-builder",
+    "build:web": "tsc && vite build --mode web",
     "build:release": "tsc && vite build && electron-builder --publish always",
     "build:demo": "tsc && vite build && electron-builder --win --config electron-builder.demo.yml",
     "preview": "vite preview"

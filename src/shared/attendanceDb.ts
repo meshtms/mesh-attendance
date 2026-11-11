@@ -1,27 +1,28 @@
-import initSqlJs, { Database } from 'sql.js'
-import { createHash } from 'crypto'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { join } from 'path'
-import { app } from 'electron'
+// Attendance database shared by the desktop (Electron) and web builds. All
+// storage-specific work is behind DbHost: the desktop build keeps the database
+// in a file under userData, the web build keeps it in the browser's IndexedDB.
+// Nothing in here may import Node or browser-only modules.
+import type { Database, SqlJsStatic } from 'sql.js'
 import Papa from 'papaparse'
 import type { CategoryInfo, CategoryType, CategoryTypeAssignment, ExcludedReason, ImportResult, StudentAbsence, StudentCourseAbsence, StudentReasonAbsence, AbsenceRecord, Notification, NewNotification } from '../shared/types'
 
-let db: Database | null = null
-
-function getDbPath(): string {
-  return join(app.getPath('userData'), 'attendance.db')
+export interface DbHost {
+  /** Loads sql.js (each build locates the .wasm differently). */
+  sql: () => Promise<SqlJsStatic>
+  /** The saved database, or null on first run. */
+  load: () => Promise<Uint8Array | null>
+  /** Persists the whole database after every write. */
+  save: (bytes: Uint8Array) => void
 }
 
-export async function initDatabase(): Promise<void> {
-  const SQL = await initSqlJs()
-  const dbPath = getDbPath()
+let db: Database | null = null
+let host: DbHost | null = null
 
-  if (existsSync(dbPath)) {
-    const fileBuffer = readFileSync(dbPath)
-    db = new SQL.Database(new Uint8Array(fileBuffer))
-  } else {
-    db = new SQL.Database()
-  }
+export async function initDatabase(dbHost: DbHost): Promise<void> {
+  host = dbHost
+  const SQL = await host.sql()
+  const saved = await host.load()
+  db = saved ? new SQL.Database(saved) : new SQL.Database()
 
   // Migrate: add absence_value column if missing (existing databases)
   const cols = db.exec("PRAGMA table_info(attendance)")
@@ -110,13 +111,16 @@ export async function initDatabase(): Promise<void> {
       FROM attendance
     `)
     if (rows.length > 0) {
+      const rehashed = await Promise.all(
+        rows[0].values.map(async (r) => {
+          const [id, sid, fn, ln, date, course, reason] = r as [
+            number, string, string, string, string, string, string,
+          ]
+          return [await hashKey(sid, fn, ln, date, course, reason), id]
+        }),
+      )
       const update = db.prepare('UPDATE attendance SET hash = ? WHERE id = ?')
-      for (const r of rows[0].values) {
-        const [id, sid, fn, ln, date, course, reason] = r as [
-          number, string, string, string, string, string, string,
-        ]
-        update.run([hashKey(sid, fn, ln, date, course, reason), id])
-      }
+      for (const pair of rehashed) update.run(pair)
       update.free()
     }
     db.run('PRAGMA user_version = 1')
@@ -159,21 +163,24 @@ export async function initDatabase(): Promise<void> {
 }
 
 function saveDatabase(): void {
-  if (!db) return
-  const data = db.export()
-  writeFileSync(getDbPath(), Buffer.from(data))
+  if (!db || !host) return
+  host.save(db.export())
 }
 
-function hashKey(
+// SHA-256 via Web Crypto, which both Node (Electron main) and browsers provide.
+// The digest matches the earlier node:crypto createHash('sha256') output, so
+// existing databases keep deduplicating against the same keys.
+async function hashKey(
   studentId: string,
   firstName: string,
   lastName: string,
   attendanceDate: string,
   course: string,
   reason: string,
-): string {
+): Promise<string> {
   const joined = [studentId, firstName, lastName, attendanceDate, course, reason].join('\x1F')
-  return createHash('sha256').update(joined).digest('hex')
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(joined))
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 const COLUMNS = [
@@ -190,10 +197,9 @@ const COLUMNS = [
 
 const STUDENT_ID_COLUMN = 'Student id'
 
-export async function importCSV(filePath: string): Promise<ImportResult> {
+export async function importCSV(csvString: string): Promise<ImportResult> {
   if (!db) throw new Error('Database not initialized')
 
-  const csvString = readFileSync(filePath, 'utf-8')
   const parsed = Papa.parse<Record<string, string>>(csvString, {
     header: true,
     skipEmptyLines: true,
@@ -205,6 +211,21 @@ export async function importCSV(filePath: string): Promise<ImportResult> {
   let skipped = 0
   const total = parsed.data.length
 
+  // Hash every row before touching the database: hashing is async, and the
+  // inserts below should not interleave with other calls.
+  const hashes = await Promise.all(
+    parsed.data.map((row) =>
+      hashKey(
+        row[STUDENT_ID_COLUMN] ?? '',
+        row['Student first name'] ?? '',
+        row['Student last name'] ?? '',
+        row['Attendance date'] ?? '',
+        row['Course'] ?? '',
+        row['Reason'] ?? '',
+      ),
+    ),
+  )
+
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO attendance
      (hash, attendance_date, reason, attendance_category, student_first_name,
@@ -212,17 +233,10 @@ export async function importCSV(filePath: string): Promise<ImportResult> {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
 
-  for (const row of parsed.data) {
+  for (const [i, row] of parsed.data.entries()) {
     const values = COLUMNS.map((col) => row[col] ?? '')
     const studentId = row[STUDENT_ID_COLUMN] ?? ''
-    const hash = hashKey(
-      studentId,
-      row['Student first name'] ?? '',
-      row['Student last name'] ?? '',
-      row['Attendance date'] ?? '',
-      row['Course'] ?? '',
-      row['Reason'] ?? '',
-    )
+    const hash = hashes[i]
     const reason = (row['Reason'] ?? '').toLowerCase()
     const absenceValue = reason.includes('partial absence') ? 0.5 : 1.0
 
