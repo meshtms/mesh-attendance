@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importCSV: () => ipcRenderer.invoke('import-csv'),
   refreshCSV: () => ipcRenderer.invoke('refresh-csv'),
   clearAttendance: () => ipcRenderer.invoke('clear-attendance'),
+  resetSettings: () => ipcRenderer.invoke('reset-settings'),
   getStudentAbsences: () => ipcRenderer.invoke('get-student-absences'),
   getStudentCourseAbsences: (firstName: string, lastName: string) =>
     ipcRenderer.invoke('get-student-course-absences', firstName, lastName),

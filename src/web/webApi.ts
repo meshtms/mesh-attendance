@@ -79,11 +79,10 @@ export async function installWebApi(): Promise<void> {
     },
     refreshCSV: async () => {
       const csv = await pickCsv()
-      if (csv === null) return null
-      attendanceDb.clearAttendance()
-      return attendanceDb.importCSV(csv)
+      return csv === null ? null : attendanceDb.importCSV(csv, true)
     },
     clearAttendance: async () => attendanceDb.clearAttendance(),
+    resetSettings: async () => attendanceDb.resetSettings(),
     getStudentAbsences: async () => attendanceDb.getStudentAbsences(),
     getStudentCourseAbsences: async (f, l) => attendanceDb.getStudentCourseAbsences(f, l),
     getStudentReasonAbsences: async (f, l) => attendanceDb.getStudentReasonAbsences(f, l),

@@ -98,31 +98,7 @@ export async function initDatabase(dbHost: DbHost): Promise<void> {
   const userVersion =
     versionResult.length > 0 ? Number(versionResult[0].values[0][0] ?? 0) : 0
   if (userVersion < 1) {
-    db.run(`
-      DELETE FROM attendance WHERE id NOT IN (
-        SELECT MIN(id) FROM attendance
-        GROUP BY student_id, student_first_name, student_last_name,
-                 attendance_date, course, reason
-      )
-    `)
-    const rows = db.exec(`
-      SELECT id, student_id, student_first_name, student_last_name,
-             attendance_date, course, reason
-      FROM attendance
-    `)
-    if (rows.length > 0) {
-      const rehashed = await Promise.all(
-        rows[0].values.map(async (r) => {
-          const [id, sid, fn, ln, date, course, reason] = r as [
-            number, string, string, string, string, string, string,
-          ]
-          return [await hashKey(sid, fn, ln, date, course, reason), id]
-        }),
-      )
-      const update = db.prepare('UPDATE attendance SET hash = ? WHERE id = ?')
-      for (const pair of rehashed) update.run(pair)
-      update.free()
-    }
+    await dedupeAndRehash()
     db.run('PRAGMA user_version = 1')
   }
 
@@ -162,6 +138,87 @@ export async function initDatabase(dbHost: DbHost): Promise<void> {
   saveDatabase()
 }
 
+/**
+ * Keeps one row per natural key (student + date + course + reason) and
+ * recomputes every hash from the current column values.
+ */
+async function dedupeAndRehash(): Promise<void> {
+  if (!db) return
+  db.run(`
+    DELETE FROM attendance WHERE id NOT IN (
+      SELECT MIN(id) FROM attendance
+      GROUP BY student_id, student_first_name, student_last_name,
+               attendance_date, course, reason
+    )
+  `)
+  const rows = db.exec(`
+    SELECT id, student_id, student_first_name, student_last_name,
+           attendance_date, course, reason
+    FROM attendance
+  `)
+  if (rows.length === 0) return
+  const rehashed = await Promise.all(
+    rows[0].values.map(async (r) => {
+      const [id, sid, fn, ln, date, course, reason] = r as [
+        number, string, string, string, string, string, string,
+      ]
+      return [await hashKey(sid, fn, ln, date, course, reason), id]
+    }),
+  )
+  const update = db.prepare('UPDATE attendance SET hash = ? WHERE id = ?')
+  for (const pair of rehashed) update.run(pair)
+  update.free()
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+/**
+ * Parses an "Attendance date" into YYYY-MM-DD, or returns null if it is not a
+ * real date in a known format. Every date comparison in this module is on
+ * text, so storing anything but ISO silently breaks the Fall/Spring split and
+ * sorting.
+ *
+ * The export itself is ISO, but a CSV opened and saved in Excel comes back in
+ * the machine's short date format. Accepted, with an optional trailing time
+ * ("8/19/2026 0:00", "2026-08-19T00:00:00"):
+ *   2026-08-19, 2026/8/19        year first
+ *   8/19/2026, 8/19/26, 8-19-2026  month first (US school, so never D/M)
+ *   19-Aug-26, 19 Aug 2026       day, month name, year
+ *   Aug 19, 2026, August 19 2026 month name, day, year
+ * Two-digit years are 20YY.
+ */
+export function parseAttendanceDate(raw: string): string | null {
+  const value = raw.trim().replace(/[T ]\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?\s*(AM|PM|Z)?$/i, '').trim()
+  let year: string, month: number, day: number
+  let m: RegExpExecArray | null
+  const monthName = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase()) + 1
+
+  if ((m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(value))) {
+    ;[year, month, day] = [m[1], Number(m[2]), Number(m[3])]
+  } else if ((m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/.exec(value))) {
+    ;[month, day, year] = [Number(m[1]), Number(m[2]), m[3]]
+  } else if ((m = /^(\d{1,2})[- ]([A-Za-z]{3,9})[- ](\d{2}|\d{4})$/.exec(value))) {
+    ;[day, month, year] = [Number(m[1]), monthName(m[2]), m[3]]
+  } else if ((m = /^([A-Za-z]{3,9})\.? (\d{1,2}),? (\d{4})$/.exec(value))) {
+    ;[month, day, year] = [monthName(m[1]), Number(m[2]), m[3]]
+  } else {
+    return null
+  }
+
+  const fullYear = Number(year.length === 2 ? `20${year}` : year)
+  // Reject impossible dates (month 13, Feb 30) by round-tripping through Date.
+  const date = new Date(Date.UTC(fullYear, month - 1, day))
+  if (
+    month < 1 ||
+    date.getUTCFullYear() !== fullYear ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return `${fullYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 function saveDatabase(): void {
   if (!db || !host) return
   host.save(db.export())
@@ -197,7 +254,12 @@ const COLUMNS = [
 
 const STUDENT_ID_COLUMN = 'Student id'
 
-export async function importCSV(csvString: string): Promise<ImportResult> {
+/**
+ * Imports a CSV export. With `replace`, existing attendance is cleared first,
+ * but only once the whole file has been checked: a file that fails to import
+ * leaves the current data untouched.
+ */
+export async function importCSV(csvString: string, replace = false): Promise<ImportResult> {
   if (!db) throw new Error('Database not initialized')
 
   const parsed = Papa.parse<Record<string, string>>(csvString, {
@@ -206,6 +268,22 @@ export async function importCSV(csvString: string): Promise<ImportResult> {
     transformHeader: (h) => h.trim(),
     transform: (value) => value.trim(),
   })
+
+  // Normalize every date up front and refuse the file if any is unreadable,
+  // rather than storing a value that sorts and buckets wrong.
+  const badDates: { line: number; value: string }[] = []
+  for (const [i, row] of parsed.data.entries()) {
+    const iso = parseAttendanceDate(row['Attendance date'] ?? '')
+    if (iso) row['Attendance date'] = iso
+    else badDates.push({ line: i + 2, value: row['Attendance date'] ?? '' })
+  }
+  if (badDates.length > 0) {
+    const first = badDates[0]
+    throw new Error(
+      `${badDates.length} row${badDates.length === 1 ? ' has' : 's have'} an unreadable Attendance date ` +
+        `(first: "${first.value}" on line ${first.line}). Nothing was imported.`,
+    )
+  }
 
   let inserted = 0
   let skipped = 0
@@ -226,32 +304,30 @@ export async function importCSV(csvString: string): Promise<ImportResult> {
     ),
   )
 
-  const stmt = db.prepare(
-    `INSERT OR IGNORE INTO attendance
-     (hash, attendance_date, reason, attendance_category, student_first_name,
-      student_last_name, course, meeting_time, head_teacher, excused_unexcused, absence_value, student_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
+  transact(() => {
+    if (replace) db!.run('DELETE FROM attendance')
+    const stmt = db!.prepare(
+      `INSERT OR IGNORE INTO attendance
+       (hash, attendance_date, reason, attendance_category, student_first_name,
+        student_last_name, course, meeting_time, head_teacher, excused_unexcused, absence_value, student_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    try {
+      for (const [i, row] of parsed.data.entries()) {
+        const values = COLUMNS.map((col) => row[col] ?? '')
+        const studentId = row[STUDENT_ID_COLUMN] ?? ''
+        const reason = (row['Reason'] ?? '').toLowerCase()
+        const absenceValue = reason.includes('partial absence') ? 0.5 : 1.0
 
-  for (const [i, row] of parsed.data.entries()) {
-    const values = COLUMNS.map((col) => row[col] ?? '')
-    const studentId = row[STUDENT_ID_COLUMN] ?? ''
-    const hash = hashes[i]
-    const reason = (row['Reason'] ?? '').toLowerCase()
-    const absenceValue = reason.includes('partial absence') ? 0.5 : 1.0
-
-    stmt.run([hash, ...values, absenceValue, studentId])
-    const modified = db.getRowsModified()
-    if (modified === 1) {
-      inserted++
-    } else {
-      skipped++
+        stmt.run([hashes[i], ...values, absenceValue, studentId])
+        if (db!.getRowsModified() === 1) inserted++
+        else skipped++
+      }
+    } finally {
+      stmt.free()
     }
-  }
-
-  stmt.free()
-  seedCategories()
-  saveDatabase()
+    seedCategories()
+  })
 
   return { total, inserted, skipped }
 }
@@ -260,6 +336,20 @@ export function clearAttendance(): void {
   if (!db) throw new Error('Database not initialized')
   db.run('DELETE FROM attendance')
   saveDatabase()
+}
+
+/**
+ * Forgets every category type and excluded reason. Categories present in the
+ * current data come back at their default (ABSENCE, nothing excluded); ones
+ * that only existed in older imports disappear. Attendance and notifications
+ * are untouched.
+ */
+export function resetSettings(): void {
+  transact(() => {
+    db!.run('DELETE FROM excluded_reasons')
+    db!.run('DELETE FROM categories')
+    seedCategories()
+  })
 }
 
 function getFallCutoff(): string | null {

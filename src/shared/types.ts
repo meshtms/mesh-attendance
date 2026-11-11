@@ -75,6 +75,7 @@ declare global {
       importCSV: () => Promise<ImportResult | null>
       refreshCSV: () => Promise<ImportResult | null>
       clearAttendance: () => Promise<void>
+      resetSettings: () => Promise<void>
       getStudentAbsences: () => Promise<StudentAbsence[]>
       getStudentCourseAbsences: (firstName: string, lastName: string) => Promise<StudentCourseAbsence[]>
       getStudentReasonAbsences: (firstName: string, lastName: string) => Promise<StudentReasonAbsence[]>

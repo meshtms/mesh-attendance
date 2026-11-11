@@ -3,7 +3,7 @@ import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import initSqlJs from 'sql.js'
 import { autoUpdater } from 'electron-updater'
-import { initDatabase, importCSV, clearAttendance, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from '../shared/attendanceDb'
+import { initDatabase, importCSV, clearAttendance, resetSettings, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from '../shared/attendanceDb'
 import type { CategoryType, CategoryTypeAssignment, ExcludedReason, NewNotification } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -81,6 +81,10 @@ app.whenReady().then(async () => {
     clearAttendance()
   })
 
+  ipcMain.handle('reset-settings', () => {
+    resetSettings()
+  })
+
   ipcMain.handle('refresh-csv', async () => {
     if (!mainWindow) return null
 
@@ -94,10 +98,8 @@ app.whenReady().then(async () => {
       return null
     }
 
-    // Read before clearing so an unreadable file leaves the data in place.
-    const csv = readFileSync(result.filePaths[0], 'utf-8')
-    clearAttendance()
-    return importCSV(csv)
+    // Replaces the data only once the file has imported cleanly.
+    return importCSV(readFileSync(result.filePaths[0], 'utf-8'), true)
   })
 
   ipcMain.handle('get-student-absences', () => {

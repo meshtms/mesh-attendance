@@ -21,8 +21,14 @@ export function useSync(onSynced: () => void) {
           )
           onSynced()
         }
-      } catch {
-        setSyncMessage(mode === 'refresh' ? 'Refresh failed' : 'Sync failed')
+      } catch (err) {
+        // Electron wraps main-process errors as "Error invoking remote method
+        // 'x': Error: <message>"; keep only the message.
+        const message = (err instanceof Error ? err.message : String(err)).replace(
+          /^Error invoking remote method '[^']+': (Error: )?/,
+          '',
+        )
+        setSyncMessage(`${mode === 'refresh' ? 'Refresh' : 'Sync'} failed: ${message}`)
       } finally {
         setSyncing(false)
       }

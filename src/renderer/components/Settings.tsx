@@ -18,10 +18,12 @@ function Settings({ onBack, onSave }: Props) {
   const [loading, setLoading] = useState(true)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const loadSettings = () =>
     Promise.all([
       window.electronAPI.getCategoryTree(),
       window.electronAPI.getExcludedReasons(),
@@ -33,6 +35,9 @@ function Settings({ onBack, onSave }: Props) {
       )
       setLoading(false)
     })
+
+  useEffect(() => {
+    loadSettings()
   }, [])
 
   const toggleReason = (category: string, reason: string) => {
@@ -94,6 +99,22 @@ function Settings({ onBack, onSave }: Props) {
       setClearing(false)
       setConfirmClearOpen(false)
       onBack()
+    }
+  }
+
+  // Stays on the page and shows the defaults, so the result is visible.
+  const handleResetSettings = async () => {
+    setResetting(true)
+    setSaveError(null)
+    try {
+      await window.electronAPI.resetSettings()
+      await loadSettings()
+      onSave()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setResetting(false)
+      setConfirmResetOpen(false)
     }
   }
 
@@ -226,6 +247,26 @@ function Settings({ onBack, onSave }: Props) {
 
         <Box sx={{ mt: 4, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+            Reset Settings
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Forget every category type and excluded reason, including categories
+            left over from older imports. Categories in the current data return
+            as ABSENCE with nothing excluded. Attendance records and notifications
+            are kept.
+          </Typography>
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            onClick={() => setConfirmResetOpen(true)}
+          >
+            Reset Settings
+          </Button>
+        </Box>
+
+        <Box sx={{ mt: 4, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
             Reset Attendance Data
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -259,6 +300,26 @@ function Settings({ onBack, onSave }: Props) {
           </Button>
           <Button onClick={handleClearAttendance} color="error" disabled={clearing}>
             {clearing ? 'Clearing...' : 'Clear'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmResetOpen} onClose={() => !resetting && setConfirmResetOpen(false)}>
+        <DialogTitle>Reset all settings?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Every category goes back to ABSENCE (including Tardy) and every
+            excluded reason is cleared, so the counts will change until you set
+            them up again. This takes effect immediately and cannot be undone.
+            Attendance records and notifications are not affected.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmResetOpen(false)} disabled={resetting}>
+            Cancel
+          </Button>
+          <Button onClick={handleResetSettings} color="error" disabled={resetting}>
+            {resetting ? 'Resetting...' : 'Reset'}
           </Button>
         </DialogActions>
       </Dialog>
