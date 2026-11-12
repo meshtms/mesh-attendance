@@ -39,7 +39,8 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "artifactName": "Casady-Attendance-Setup-${version}.${ext}"
+      "artifactName": "Casady-Attendance-Setup-${version}.${ext}",
+      "shortcutName": "Casady Attendance"
     },
     "mac": {
       "target": "dmg"
