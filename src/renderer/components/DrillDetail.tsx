@@ -6,6 +6,7 @@ import { getColor, COLOR_EXCUSED, COLOR_UNEXCUSED, type ChartEntry } from './cha
 import NotificationHistory from './NotificationHistory'
 import type { StudentAbsence, AbsenceRecord, CategoryType } from '../../shared/types'
 import { GROUP_ABSENCE, GROUP_TARDY } from './gridStyles'
+import { parseLocalDate } from '../dates'
 
 interface Props {
   student: StudentAbsence
@@ -255,7 +256,7 @@ function DrillDetail({ student }: Props) {
     ]
     const counts = [0, 0, 0, 0, 0]
     for (const r of filteredRecords) {
-      const date = new Date(r.attendance_date)
+      const date = parseLocalDate(r.attendance_date)
       const dow = date.getDay() // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
       if (dow >= 1 && dow <= 5) {
         counts[dow - 1] += r.absence_value

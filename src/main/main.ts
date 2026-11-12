@@ -1,11 +1,11 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Menu, powerMonitor } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import initSqlJs from 'sql.js'
 import { autoUpdater } from 'electron-updater'
 import { initDatasets, listDatasets, switchDataset, createDataset, renameDataset, deleteDataset } from '../shared/datasets'
 import { importCSV, clearAttendance, resetSettings, getStudentAbsences, getStudentCourseAbsences, getStudentReasonAbsences, getStudentRecords, getStudentCourseRecords, getStudentReasonRecords, getCategoryTree, getExcludedReasons, setExcludedReasons, setCategoryTypes, getStudentNotifications, addNotification, deleteNotification } from '../shared/attendanceDb'
-import type { CategoryType, CategoryTypeAssignment, ExcludedReason, NewNotification } from '../shared/types'
+import type { CategoryType, CategoryTypeAssignment, ExcludedReason, NewNotification, UpdateStatus } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -77,6 +77,127 @@ const datasetDir = () => userData('datasets')
 const datasetPath = (id: string) => join(datasetDir(), `${id}.db`)
 const registryPath = () => join(datasetDir(), 'registry.json')
 const readIfExists = (path: string) => (existsSync(path) ? new Uint8Array(readFileSync(path)) : null)
+
+// ---- Auto-update ----------------------------------------------------------
+// Packaged production builds only: never in dev or in preview builds
+// (those must never pull the real release feed).
+const UPDATES_ENABLED = !process.env.VITE_DEV_SERVER_URL && !IS_PREVIEW && app.isPackaged
+const CHECK_INTERVAL_MS = 60 * 60 * 1000
+// Dev mode (npm run dev) can't install anything, so it fakes the updater to let
+// the header button be tested: no network, nothing installed. Each click plays
+// the next outcome in turn.
+const UPDATES_SIMULATED = !!process.env.VITE_DEV_SERVER_URL
+const SIM_OUTCOMES = ['up-to-date', 'error', 'update'] as const
+let simClicks = 0
+
+// The main process owns the update state so it survives the renderer
+// remounting (switching datasets) and a check that finishes before the page loads.
+let updateState: UpdateStatus = { status: UPDATES_ENABLED || UPDATES_SIMULATED ? 'idle' : 'disabled' }
+let checkInFlight = false
+// Show errors only for checks someone is waiting on (startup or a click), so a
+// Wi-Fi blip during an hourly background check doesn't put up a banner.
+let reportErrors = false
+let checkTimer: NodeJS.Timeout | null = null
+let upToDateTimer: NodeJS.Timeout | null = null
+
+function setUpdateState(next: UpdateStatus) {
+  updateState = next
+  if (upToDateTimer) {
+    clearTimeout(upToDateTimer)
+    upToDateTimer = null
+  }
+  // "Up to date" is a passing confirmation, not a lasting state.
+  if (next.status === 'up-to-date') {
+    upToDateTimer = setTimeout(() => setUpdateState({ status: 'idle' }), 5000)
+  }
+  mainWindow?.webContents.send('update-status', next)
+}
+
+function simulateCheck() {
+  if (updateState.status === 'checking' || updateState.status === 'available' || updateState.status === 'downloading' || updateState.status === 'ready') return
+  const outcome = SIM_OUTCOMES[simClicks++ % SIM_OUTCOMES.length]
+  const version = '9.9.9-dev'
+  setUpdateState({ status: 'checking' })
+  setTimeout(() => {
+    if (outcome === 'up-to-date') return setUpdateState({ status: 'up-to-date' })
+    if (outcome === 'error') return setUpdateState({ status: 'error', message: 'Simulated failure (dev mode)' })
+    setUpdateState({ status: 'available', version })
+    let percent = 0
+    const tick = setInterval(() => {
+      percent += 10
+      if (percent < 100) return setUpdateState({ status: 'downloading', version, percent })
+      clearInterval(tick)
+      setUpdateState({ status: 'ready', version })
+    }, 400)
+  }, 1500)
+}
+
+async function checkForUpdates(manual: boolean) {
+  if (UPDATES_SIMULATED) {
+    if (manual) simulateCheck()
+    return
+  }
+  if (!UPDATES_ENABLED) return
+  // Once an update is downloading or waiting to install there is nothing to
+  // check; checking again would only find (and fetch) the same update.
+  if (updateState.status === 'available' || updateState.status === 'downloading' || updateState.status === 'ready') return
+  if (manual) {
+    reportErrors = true
+    setUpdateState({ status: 'checking' })
+  }
+  if (checkInFlight) return
+  checkInFlight = true
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch {
+    // Reported through the 'error' event in setupAutoUpdate.
+  } finally {
+    checkInFlight = false
+  }
+}
+
+function setupAutoUpdate() {
+  if (!UPDATES_ENABLED) return
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  // Listeners are attached once here, never per check.
+  autoUpdater.on('update-available', (info) => {
+    setUpdateState({ status: 'available', version: info.version })
+  })
+  autoUpdater.on('update-not-available', () => {
+    setUpdateState({ status: reportErrors ? 'up-to-date' : 'idle' })
+    reportErrors = false
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    setUpdateState({ status: 'downloading', version: updateState.version, percent: Math.round(progress.percent) })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    setUpdateState({ status: 'ready', version: info.version })
+    reportErrors = false
+    if (checkTimer) {
+      clearInterval(checkTimer)
+      checkTimer = null
+    }
+  })
+  autoUpdater.on('error', (err) => {
+    // A failed download is always worth showing; a failed background check is not.
+    const downloading = updateState.status === 'available' || updateState.status === 'downloading'
+    if (reportErrors || downloading) {
+      setUpdateState({ status: 'error', message: err?.message ?? String(err) })
+    } else if (updateState.status !== 'idle') {
+      setUpdateState({ status: 'idle' })
+    }
+    reportErrors = false
+  })
+
+  // The startup check reports errors, like a click would.
+  reportErrors = true
+  checkForUpdates(false)
+  checkTimer = setInterval(() => checkForUpdates(false), CHECK_INTERVAL_MS)
+  // A laptop that slept overnight checks on wake instead of up to an hour later.
+  powerMonitor.on('resume', () => checkForUpdates(false))
+}
 
 app.whenReady().then(async () => {
   if (!isPrimaryInstance) return
@@ -195,36 +316,27 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Auto-update (production builds only, never preview builds). Checks once at
-  // startup; a downloaded update installs on "Restart to Update" or on quit.
-  if (!process.env.VITE_DEV_SERVER_URL && !IS_PREVIEW) {
-    autoUpdater.autoDownload = true
-    autoUpdater.autoInstallOnAppQuit = true
-
-    autoUpdater.on('update-available', (info) => {
-      mainWindow?.webContents.send('update-status', { status: 'available', version: info.version })
-    })
-
-    autoUpdater.on('download-progress', (progress) => {
-      mainWindow?.webContents.send('update-status', { status: 'downloading', percent: Math.round(progress.percent) })
-    })
-
-    autoUpdater.on('update-downloaded', () => {
-      mainWindow?.webContents.send('update-status', { status: 'ready' })
-    })
-
-    autoUpdater.on('error', (err) => {
-      mainWindow?.webContents.send('update-status', { status: 'error', message: err.message })
-    })
-
-    autoUpdater.checkForUpdates()
-  }
+  setupAutoUpdate()
 
   ipcMain.handle('get-version', () => app.getVersion())
 
   ipcMain.handle('install-update', () => {
+    if (updateState.status !== 'ready') return
+    if (UPDATES_SIMULATED) {
+      dialog.showMessageBox(mainWindow!, {
+        type: 'info',
+        title: 'Install Update (dev)',
+        message: 'In the installed app, this restarts and installs the update. Dev mode only simulates it.',
+      })
+      setUpdateState({ status: 'idle' })
+      return
+    }
     autoUpdater.quitAndInstall()
   })
+
+  ipcMain.handle('get-update-status', () => updateState)
+
+  ipcMain.handle('check-for-updates', () => checkForUpdates(true))
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { AppBar, Toolbar, Typography, Button, Box, TextField, IconButton } from '@mui/material'
 import SettingsIcon from '@mui/icons-material/Settings'
-import type { DatasetList, UpdateStatus } from '../shared/types'
+import type { DatasetList } from '../shared/types'
 import { DataGrid, GridColDef, GridRowParams, GridColumnGroupingModel } from '@mui/x-data-grid'
 import type { StudentAbsence } from '../shared/types'
 import { useStudentAbsences } from './hooks/useStudentAbsences'
@@ -10,6 +10,7 @@ import DrillDetail from './components/DrillDetail'
 import Settings from './components/Settings'
 import SyncButton from './components/SyncButton'
 import DatasetSwitcher from './components/DatasetSwitcher'
+import UpdateButton from './components/UpdateButton'
 import { COLOR_WARN, COLOR_ORANGE, COLOR_DANGER } from './components/chartColors'
 import { GROUP_ABSENCE, GROUP_TARDY, gridSx, thresholdColor } from './components/gridStyles'
 
@@ -204,12 +205,6 @@ function App({ datasets, onDatasetsChange }: Props) {
   const [thresholdFilter, setThresholdFilter] = useState<number | null>(null)
 
   const { syncing, syncMessage, sync, refresh } = useSync(reloadStudents)
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
-
-  useEffect(() => {
-    window.electronAPI.onUpdateStatus(setUpdateStatus)
-  }, [])
-
   const handleRowClick = useCallback((params: GridRowParams) => {
     const row = params.row as StudentAbsence & { id: number }
     setSelectedStudent(row)
@@ -284,38 +279,13 @@ function App({ datasets, onDatasetsChange }: Props) {
           </Typography>
           <DatasetSwitcher list={datasets} onChange={onDatasetsChange} />
           <Box sx={{ flexGrow: 1 }} />
-          {updateStatus?.status === 'available' && (
-            <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
-              Update v{updateStatus.version} found...
-            </Typography>
-          )}
-          {updateStatus?.status === 'error' && (
-            <Typography variant="body2" sx={{ mr: 2, color: 'error.main' }}>
-              Update error: {updateStatus.message || 'unknown'}
-            </Typography>
-          )}
-          {updateStatus?.status === 'downloading' && (
-            <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
-              Downloading update... {updateStatus.percent}%
-            </Typography>
-          )}
-          {updateStatus?.status === 'ready' && (
-            <Button
-              size="small"
-              variant="contained"
-              color="success"
-              sx={{ mr: 2 }}
-              onClick={() => window.electronAPI.installUpdate()}
-            >
-              Restart to Update
-            </Button>
-          )}
           {syncMessage && (
             <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary' }}>
               {syncMessage}
             </Typography>
           )}
           <SyncButton syncing={syncing} onSync={sync} onRefresh={refresh} datasetName={datasetName} />
+          <UpdateButton />
           <IconButton onClick={() => setShowSettings(true)} sx={{ ml: 1 }} title="Settings">
             <SettingsIcon />
           </IconButton>

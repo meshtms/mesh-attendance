@@ -4,6 +4,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import { useNotifications } from '../hooks/useNotifications'
 import type { NewNotification } from '../../shared/types'
+import { parseLocalDate, todayLocal } from '../dates'
 
 interface Props {
   studentFirstName: string
@@ -19,12 +20,12 @@ const THRESHOLDS = [
 ]
 
 function formatDate(dateStr: string): string {
-  const date = new Date(dateStr)
+  const date = parseLocalDate(dateStr)
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function getTodayStr(): string {
-  return new Date().toISOString().split('T')[0]
+  return todayLocal()
 }
 
 export default function NotificationHistory({ studentFirstName, studentLastName, studentId, showHeadings = true }: Props) {

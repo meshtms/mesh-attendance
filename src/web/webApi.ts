@@ -125,7 +125,9 @@ export async function installWebApi(): Promise<void> {
     setExcludedReasons: async (reasons) => attendanceDb.setExcludedReasons(reasons),
     setCategoryTypes: async (types) => attendanceDb.setCategoryTypes(types),
     // The web build updates by redeploying; there is nothing to install.
-    onUpdateStatus: () => {},
+    onUpdateStatus: () => () => {},
+    getUpdateStatus: async () => ({ status: 'disabled' }),
+    checkForUpdates: async () => {},
     installUpdate: async () => {},
     getVersion: async () => __APP_VERSION__,
     getStudentNotifications: async (f, l) => attendanceDb.getStudentNotifications(f, l),

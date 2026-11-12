@@ -91,7 +91,10 @@ declare global {
       getExcludedReasons: () => Promise<ExcludedReason[]>
       setExcludedReasons: (reasons: ExcludedReason[]) => Promise<void>
       setCategoryTypes: (types: CategoryTypeAssignment[]) => Promise<void>
-      onUpdateStatus: (callback: (status: UpdateStatus) => void) => void
+      /** Subscribes to update state changes; returns an unsubscribe function. */
+      onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
+      getUpdateStatus: () => Promise<UpdateStatus>
+      checkForUpdates: () => Promise<void>
       installUpdate: () => Promise<void>
       getVersion: () => Promise<string>
       getStudentNotifications: (firstName: string, lastName: string) => Promise<Notification[]>
@@ -113,7 +116,12 @@ export interface DatasetList {
 }
 
 export interface UpdateStatus {
-  status: 'available' | 'downloading' | 'ready' | 'error'
+  /**
+   * disabled: this build can't self-update (dev, preview, web).
+   * idle: nothing pending. checking: a check someone asked for is running.
+   * up-to-date: that check found nothing (shown briefly, then idle).
+   */
+  status: 'disabled' | 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'error'
   version?: string
   percent?: number
   message?: string

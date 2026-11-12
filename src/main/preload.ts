@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { UpdateStatus } from '../shared/types'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   importCSV: () => ipcRenderer.invoke('import-csv'),
@@ -28,9 +29,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('set-excluded-reasons', reasons),
   setCategoryTypes: (types: { category: string; type: string }[]) =>
     ipcRenderer.invoke('set-category-types', types),
-  onUpdateStatus: (callback: (status: { status: string; version?: string; percent?: number; message?: string }) => void) => {
-    ipcRenderer.on('update-status', (_event, data) => callback(data))
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
+    const listener = (_event: IpcRendererEvent, data: UpdateStatus) => callback(data)
+    ipcRenderer.on('update-status', listener)
+    return () => {
+      ipcRenderer.removeListener('update-status', listener)
+    }
   },
+  getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   getVersion: () => ipcRenderer.invoke('get-version'),
   getStudentNotifications: (firstName: string, lastName: string) =>
